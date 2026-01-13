@@ -1,4 +1,4 @@
-import { LLMMessage, LLMProvider, LLMResponse } from "./types.js";
+import { LLMMessage, LLMProvider, LLMResponse, StreamCallbacks } from "./types.js";
 import { OllamaProvider } from "./ollama.js";
 import { AnthropicBeta } from "@anthropic-ai/sdk/resources";
 import { AnthropicProvider } from "./anthropic.js";
@@ -39,6 +39,31 @@ export class LLMRouter {
         }
 
         return { success: false, error: 'All providers failed' };
+    }
+
+    async sendMessageStream(
+        messages: LLMMessage[],
+        callbacks: StreamCallbacks,
+        signal?: AbortSignal,
+    ): Promise<void> {
+        const orderedProviders = this.getOrderedProviders();
+
+        for (const provider of orderedProviders) {
+            if (!await provider.isAvailable()) continue;
+            if (!provider.sendMessageStream) {
+                console.log(`[LLMRouter] ${provider.name} is not available, skipping`);
+                continue;
+            }
+
+            try {
+                await provider.sendMessageStream(messages, callbacks, signal);
+                return;
+            } catch (error) {
+                console.log(`[LLMRouter] ${provider.name} streaming failed`, error);
+            }
+        }
+
+        callbacks.onError('All providers failed or no streaming support');
     }
 
     private getOrderedProviders(): LLMProvider[] {

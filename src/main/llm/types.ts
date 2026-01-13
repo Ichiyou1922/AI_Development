@@ -13,5 +13,16 @@ export interface LLMResponse {
 export interface LLMProvider {
     name: string;
     sendMessage(messages: LLMMessage[]): Promise<LLMResponse>;
+    sendMessageStream?(
+        messages: LLMMessage[],
+        callback: StreamCallbacks,
+        signal?: AbortSignal
+    ): Promise<void>;
     isAvailable(): Promise<boolean>;
+}
+
+export interface StreamCallbacks {
+    onToken: (token: string) => void;
+    onDone: (fullText: string) => void;
+    onError: (error: string) => void;
 }
