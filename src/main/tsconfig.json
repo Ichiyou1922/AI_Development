@@ -4,7 +4,8 @@
     "module": "CommonJS",
     "moduleResolution": "node",
     "outDir": "../../dist/main",
-    "rootDir": "."
+    "rootDir": ".",
+    "types": ["node"]
   },
   "include": ["./**/*"]
 }
