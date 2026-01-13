@@ -12,7 +12,6 @@ export interface LLMResponse {
 
 export interface LLMProvider {
     name: string;
-    sendMessage(messages: LLMMessage[]): Promise<LLMResponse>;
     sendMessageStream?(
         messages: LLMMessage[],
         callback: StreamCallbacks,

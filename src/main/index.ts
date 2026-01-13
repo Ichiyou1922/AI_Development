@@ -2,17 +2,18 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 import { LLMRouter, ProviderPreference } from './llm/router.js';
-import { LLMMessage } from './llm/types.js';
+import { LLMMessage, StreamCallbacks } from './llm/types.js';
 
 // read .env
 dotenv.config();
 
 const llmRouter = new LLMRouter('local-first');
-
 const conversationHistory: LLMMessage[] = [];
 
+let mainWindow: BrowserWindow | null = null;
+
 function createWindow(): void {
-    const mainWindow = new BrowserWindow({
+    mainWindow = new BrowserWindow({
         width: 800,
         height: 600,
         webPreferences: {
@@ -24,19 +25,42 @@ function createWindow(): void {
 
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
     mainWindow.webContents.openDevTools();
+
+    mainWindow.on('closed', () => {
+        mainWindow = null;
+    });
 }
 
-// IPC: メッセージ送信
-ipcMain.handle('send-message', async (_event, message: string) => {
+// 非ストリーミングのメッセージハンドラは削除（ストリーミングのみ利用）
+
+// IPC: メッセージストリーム
+ipcMain.handle('send-message-stream', async (_event, message: string) => {
+    // 会話履歴に追加
     conversationHistory.push({ role: 'user', content: message });
 
-    const response = await llmRouter.sendMessage(conversationHistory);
+    // コールバック定義
+    const callbacks: StreamCallbacks = {
+        onToken: (token) => {
+            // Rendererにトークンを送信
+            mainWindow?.webContents.send('llm-token', { token });
+        },
+        onDone: (fullText) => {
+            // 会話履歴に追加
+            conversationHistory.push({ role: 'assistant', content: fullText });
+            // Rendererに完了通知
+            mainWindow?.webContents.send('llmdone', { fullText });
+        },
+        onError: (error) => {
+            // Rendererにエラー通知
+            mainWindow?.webContents.send('llm-error', { error });
+        }
+    };
 
-    if (response.success && response.text) {
-        conversationHistory.push({ role: 'assistant', content: response.text });
-    }
+    // ストリーミング開始
+    await llmRouter.sendMessageStream(conversationHistory, callbacks);
 
-    return response;
+    // 戻り値
+    return { started: true };
 });
 
 // IPC: プロバイダ設定の取得

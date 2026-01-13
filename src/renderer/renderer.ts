@@ -1,6 +1,6 @@
 // ProviderPreference はグローバルな型定義で提供される
 
-import { ProviderPreference } from "./types";
+type ProviderPreference = 'local-first' | 'api-first' | 'local-only' | 'api-only';
 
 const messagesContainer = document.getElementById('messages') as HTMLDivElement;
 const userInput = document.getElementById('user-input') as HTMLInputElement;
@@ -85,8 +85,10 @@ function createEmptyAssistantMessage(): void {
     createEmptyAssistantMessage();
 
     // リスナー登録
+    // 既存のリスナーが残っているとトークンが重複するため、先に解除する
+    window.electronAPI.removeAllListeners();
     window.electronAPI.onLLMToken((token) => {
-        appendToken(token);
+      appendToken(token);
     });
 
     window.electronAPI.onLLMDone((_fullText) => {
@@ -118,44 +120,11 @@ function createEmptyAssistantMessage(): void {
     }
  });
 
-async function sendMessage(): Promise<void> {
-  const message = userInput.value.trim();
-  if (!message) return;
-  
-  userInput.value = '';
-  sendButton.disabled = true;
-  addMessage('user', message);
-  
-  try {
-    const response = await window.electronAPI.sendMessage(message);
-    
-    if (response.success && response.text) {
-      addMessage('assistant', response.text, response.provider);
-    } else {
-      addMessage('assistant', `エラー: ${response.error}`);
-    }
-  } catch (error) {
-    addMessage('assistant', `通信エラー: ${error}`);
-  } finally {
-    sendButton.disabled = false;
-    userInput.focus();
-  }
-}
-
 async function initializeUI(): Promise<void> {
   // 現在のプロバイダー設定を取得
   const preference = await window.electronAPI.getProviderPreference();
   providerSelect.value = preference;
 }
-
-// イベントリスナー
-sendButton.addEventListener('click', sendMessage);
-
-userInput.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter') {
-    sendMessage();
-  }
-});
 
 providerSelect.addEventListener('change', async () => {
   const preference = providerSelect.value as ProviderPreference;

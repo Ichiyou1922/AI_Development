@@ -1,7 +1,6 @@
 declare global {
   interface ElectronAPI {
-    sendMessage(message: string): Promise<{ success: boolean; text?: string; error?: string; provider?: string }>;
-    sendMessageStream(message: string): Promise<void>;
+    sendMessageStream(message: string): Promise<{ started: boolean }>;
     getProviderPreference(): Promise<string>;
     setProviderPreference(preference: string): Promise<void>;
     clearHistory(): Promise<void>;

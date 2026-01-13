@@ -1,4 +1,4 @@
-import { LLMMessage, LLMProvider, LLMResponse, StreamCallbacks } from "./types.js";
+import { LLMMessage, LLMProvider, StreamCallbacks } from "./types.js";
 import { OllamaProvider } from "./ollama.js";
 import { AnthropicBeta } from "@anthropic-ai/sdk/resources";
 import { AnthropicProvider } from "./anthropic.js";
@@ -17,29 +17,7 @@ export class LLMRouter {
         this.providers.push(new AnthropicProvider(process.env.ANTHROPIC_API_KEY));
     }
 
-    async sendMessage(messages: LLMMessage[]): Promise<LLMResponse> {
-        const orderedProviders = this.getOrderedProviders();
-
-        for (const provider of orderedProviders) {
-            const available = await provider.isAvailable();
-            if (!available) {
-                console.log(`[LLMRouter] ${provider.name} is not available, skipping`);
-                continue;
-            }
-
-            console.log(`[LLMRouter] Trying ${provider.name}...`);
-            const response = await provider.sendMessage(messages);
-
-            if (response.success) {
-                console.log(`[LLMRouter] Success with ${provider.name}`);
-                return response;
-            }
-
-            console.log(`[LLMRouter] ${provider.name} failed: ${response.error}`);
-        }
-
-        return { success: false, error: 'All providers failed' };
-    }
+    // 非ストリーミング sendMessage は削除。ストリーミングのみ使用。
 
     async sendMessageStream(
         messages: LLMMessage[],

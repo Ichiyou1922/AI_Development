@@ -12,7 +12,6 @@ interface LLMResponse {
 
 // 型だけ
 interface ElectronAPI {
-  sendMessage: (message: string) => Promise<LLMResponse>;
   getProviderPreference: () => Promise<ProviderPreference>;
   setProviderPreference: (preference: ProviderPreference) => Promise<{ success: boolean }>;
   clearHistory: () => Promise<{ success: boolean }>;
