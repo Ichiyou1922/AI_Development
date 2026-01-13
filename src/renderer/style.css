@@ -92,3 +92,47 @@ h1 {
   background-color: #555;
   cursor: not-allowed;
 }
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+header h1 {
+  margin: 0;
+}
+
+#controls {
+  display: flex;
+  gap: 10px;
+}
+
+#provider-select {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background-color: #16213e;
+  color: #eaeaea;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+#provider-select:focus {
+  outline: 2px solid #00d9ff;
+}
+
+#clear-button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  background-color: #e94560;
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+#clear-button:hover {
+  background-color: #c73e54;
+}

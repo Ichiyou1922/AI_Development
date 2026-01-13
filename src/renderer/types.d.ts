@@ -1,10 +1,19 @@
+// グローバルな型定義（モジュールにしない）
+type ProviderPreference = 'local-first' | 'api-first' | 'local-only' | 'api-only';
+
+interface LLMResponse {
+  success: boolean;
+  text?: string;
+  error?: string;
+  provider?: 'anthropic' | 'ollama';
+}
+
+// 型だけ
 interface ElectronAPI {
-  ping: () => string;
-  sendMessage: (message: string) => Promise<{
-    success: boolean;
-    text?: string;
-    error?: string;
-  }>;
+  sendMessage: (message: string) => Promise<LLMResponse>;
+  getProviderPreference: () => Promise<ProviderPreference>;
+  setProviderPreference: (preference: ProviderPreference) => Promise<{ success: boolean }>;
+  clearHistory: () => Promise<{ success: boolean }>;
 }
 
 interface Window {

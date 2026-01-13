@@ -10,7 +10,18 @@
 </head>
 <body>
   <div id="app">
-    <h1>AI Agent</h1>
+    <header>
+      <h1>AI Agent</h1>
+      <div id="controls">
+        <select id="provider-select">
+          <option value="local-first">ローカル優先</option>
+          <option value="api-first">API優先</option>
+          <option value="local-only">ローカルのみ</option>
+          <option value="api-only">APIのみ</option>
+        </select>
+        <button id="clear-button">履歴クリア</button>
+      </div>
+    </header>
     <div id="chat-container">
       <div id="messages"></div>
       <div id="input-area">

@@ -1,14 +1,15 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import * as path from 'path';
-import Anthropic from '@anthropic-ai/sdk';
 import * as dotenv from 'dotenv';
+import { LLMRouter, ProviderPreference } from './llm/router.js';
+import { LLMMessage } from './llm/types.js';
 
 // read .env
 dotenv.config();
 
-const anthropic = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-});
+const llmRouter = new LLMRouter('local-first');
+
+const conversationHistory: LLMMessage[] = [];
 
 function createWindow(): void {
     const mainWindow = new BrowserWindow({
@@ -25,25 +26,34 @@ function createWindow(): void {
     mainWindow.webContents.openDevTools();
 }
 
+// IPC: メッセージ送信
 ipcMain.handle('send-message', async (_event, message: string) => {
-    try {
-        const response = await anthropic.messages.create({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 1024,
-            messages: [
-                { role: 'user', content: message}
-            ],
-        });
+    conversationHistory.push({ role: 'user', content: message });
 
-        const content = response.content[0];
-        if (content.type === 'text') {
-            return { success: true, text: content.text};
-        }
-        return { success: false, error: 'Unexpected response type'};
-    } catch (error) {
-        const errorMessage = error instanceof Error ? error.message: 'Unknown error';
-        return { success: false, error: errorMessage };
+    const response = await llmRouter.sendMessage(conversationHistory);
+
+    if (response.success && response.text) {
+        conversationHistory.push({ role: 'assistant', content: response.text });
     }
+
+    return response;
+});
+
+// IPC: プロバイダ設定の取得
+ipcMain.handle('get-provider-preference', () => {
+    return llmRouter.getPreference();
+});
+
+// IPC: プロバイダ設定の変更
+ipcMain.handle('set-provider-preference', (_event, preference: ProviderPreference) => {
+    llmRouter.setPreference(preference);
+    return { success: true };
+});
+
+// IPC: 会話履歴のクリア
+ipcMain.handle('clear-history', () => {
+    conversationHistory.length = 0;
+    return { success: true };
 });
 
 app.whenReady().then(() => {
