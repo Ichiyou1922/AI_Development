@@ -1,0 +1,17 @@
+node_modules/
+dist/
+*.log
+npm-debug.log*
+yarn-error.log*
+.DS_Store
+.env
+.env.local
+.vscode/
+.idea/
+coverage/
+build/
+out/
+/.parcel-cache
+/.pnp.cjs
+*.tgz
+node_modules/**/test/
