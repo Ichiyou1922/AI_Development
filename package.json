@@ -25,6 +25,8 @@
   },
   "homepage": "https://github.com/Ichiyou1922/AI_Development#readme",
   "dependencies": {
+    "@anthropic-ai/sdk": "0.71.2",
+    "dotenv": "17.2.3",
     "electron": "39.2.7"
   },
   "devDependencies": {
