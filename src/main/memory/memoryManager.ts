@@ -1,4 +1,5 @@
 import { VectorStore } from './vectorStore.js';
+import { UserProfile, ProfileCategory } from './userProfile.js';
 import { 
     MemoryEntry, 
     MemoryMetadata, 
@@ -26,10 +27,12 @@ interface ExtractedInfo {
  */
 export class MemoryManager {
     private vectorStore: VectorStore;
+    private userProfile: UserProfile;
     private extractionEnabled: boolean = true;
 
-    constructor(vectorStore: VectorStore) {
+    constructor(vectorStore: VectorStore, userProfile: UserProfile) {
         this.vectorStore = vectorStore;
+        this.userProfile = userProfile;
     }
 
     /**
@@ -51,6 +54,7 @@ export class MemoryManager {
             importance: number;
             tags: string[];
             extractor: (match: RegExpMatchArray, msg: string) => string;
+            profileUpdate?: (match: RegExpMatchArray) => { category: ProfileCategory; key: string; value: string };
         }> = [
             // 名前の自己紹介
             {
@@ -59,6 +63,11 @@ export class MemoryManager {
                 importance: 0.9,
                 tags: ['user', 'name', 'identity'],
                 extractor: (match) => `ユーザーの名前は「${match[1].trim()}」である`,
+                profileUpdate: (match) => ({
+                    category: 'identity',
+                    key: '名前',
+                    value: match[1].trim(),
+                }),
             },
             // 年齢
             {
@@ -67,6 +76,11 @@ export class MemoryManager {
                 importance: 0.7,
                 tags: ['user', 'age', 'identity'],
                 extractor: (match) => `ユーザーは${match[1]}歳である`,
+                profileUpdate: (match) => ({
+                    category: 'identity',
+                    key: '年齢',
+                    value: `${match[1]}歳`,
+                }),
             },
             // 職業
             {
@@ -75,6 +89,11 @@ export class MemoryManager {
                 importance: 0.8,
                 tags: ['user', 'job', 'identity'],
                 extractor: (match) => `ユーザーの職業は「${match[1].trim()}」である`,
+                profileUpdate: (match) => ({
+                    category: 'occupation',
+                    key: '職業',
+                    value: match[1].trim(),
+                }),
             },
             // 趣味
             {
@@ -83,6 +102,11 @@ export class MemoryManager {
                 importance: 0.6,
                 tags: ['user', 'hobby', 'preference'],
                 extractor: (match) => `ユーザーの趣味は「${match[1].trim()}」である`,
+                profileUpdate: (match) => ({
+                    category: 'preference',
+                    key: '趣味',
+                    value: match[1].trim(),
+                }),
             },
             // 好み（好き）
             {
@@ -91,6 +115,11 @@ export class MemoryManager {
                 importance: 0.5,
                 tags: ['user', 'like', 'preference'],
                 extractor: (match) => `ユーザーは「${match[1].trim()}」が好きである`,
+                profileUpdate: (match) => ({
+                    category: 'preference',
+                    key: `好き_${match[1].trim()}`,
+                    value: match[1].trim(),
+                }),
             },
             // 好み（嫌い）
             {
@@ -99,6 +128,11 @@ export class MemoryManager {
                 importance: 0.5,
                 tags: ['user', 'dislike', 'preference'],
                 extractor: (match) => `ユーザーは「${match[1].trim()}」が嫌い/苦手である`,
+                profileUpdate: (match) => ({
+                    category: 'preference',
+                    key: `嫌い_${match[1].trim()}`,
+                    value: match[1].trim(),
+                }),
             },
             // 住んでいる場所
             {
@@ -107,6 +141,11 @@ export class MemoryManager {
                 importance: 0.7,
                 tags: ['user', 'location', 'identity'],
                 extractor: (match) => `ユーザーは「${match[1].trim()}」に住んでいる`,
+                profileUpdate: (match) => ({
+                    category: 'location',
+                    key: '居住地',
+                    value: match[1].trim(),
+                }),
             },
             // 覚えておいて系
             {
@@ -121,6 +160,14 @@ export class MemoryManager {
         for (const pattern of patterns) {
             const match = userMessage.match(pattern.regex);
             if (match) {
+                if (pattern.profileUpdate) {
+                    const update = pattern.profileUpdate(match);
+                    this.userProfile.set(update.category, update.key, update.value, {
+                        confidence: pattern.importance,
+                        source: 'explicit',
+                    });
+                }
+
                 return {
                     shouldSave: true,
                     type: pattern.type,
@@ -133,7 +180,28 @@ export class MemoryManager {
 
         return null;
     }
+    // プロファイル情報を取得
+    getProfile(): UserProfile {
+        return this.userProfile;
+    }
+    // プロンプト用のコンテキスト生成（プロファイル + 関連記憶）
+    async buildContextForPrompt(query: string): Promise<string> {
+        const parts: string[] = [];
 
+        // プロファイル情報
+        const profileContext = this.userProfile.formatForPrompt();
+        if (profileContext) {
+            parts.push(profileContext);
+        }
+
+        // 関連記憶
+        const memories = await this.searchRelevantMemories(query, 3, 0.4);
+        if (memories.length > 0) {
+            parts.push(this.formatMemoriesForPrompt(memories));
+        }
+
+        return parts.join('\n\n');
+    }
     /**
      * 抽出した情報を記憶に保存
      */

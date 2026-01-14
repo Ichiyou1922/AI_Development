@@ -67,4 +67,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     
     setProviderPreference: (preference: string) => 
         ipcRenderer.invoke('set-provider-preference', preference),
+
+    // ============================================================
+    // プロファイル管理
+    // ============================================================
+    profileGetAll: () =>
+        ipcRenderer.invoke('profile-get-all'),
+    
+    profileSet: (category: string, key: string, value: string) =>
+        ipcRenderer.invoke('profile-set', category, key, value),
+    
+    profileDelete: (category: string, key: string) =>
+        ipcRenderer.invoke('profile-delete', category, key),
+    
+    profileClear: () =>
+        ipcRenderer.invoke('profile-clear'),
+    
+    profileStats: () =>
+        ipcRenderer.invoke('profile-stats'),
+
+    // メンテナンス
+    memoryMaintenance: () =>
+        ipcRenderer.invoke('memory-maintenance'),
 });

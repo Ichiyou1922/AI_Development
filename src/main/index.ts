@@ -4,7 +4,16 @@ import * as dotenv from 'dotenv';
 import { LLMRouter, ProviderPreference } from './llm/router.js';
 import { LLMMessage, StreamCallbacks } from './llm/types.js';
 import { ConversationStorage } from './storage/conversationStorage.js';
-import { VectorStore, createEmbeddingProvider, MemoryManager } from './memory/index.js';
+import { 
+    VectorStore, 
+    createEmbeddingProvider, 
+    MemoryManager,
+    UserProfile,
+    MemoryLifecycle, 
+} from './memory/index.js';
+
+let userProfile: UserProfile;
+let memoryLifecycle: MemoryLifecycle;
 
 // read .env
 dotenv.config();
@@ -119,6 +128,22 @@ ipcMain.handle('send-message-stream', async (_event, message: string) => {
         }
     }
 
+    // プロファイル + 記憶を含むコンテキスト生成
+    let context = '';
+    try {
+        context = await memoryManager.buildContextForPrompt(message);
+        if (context) {
+            console.log(`[LAG] Context built for prompt`);
+        }
+    } catch (error) {
+        console.error('[RAG] Context building failed:', error);
+    }
+
+    const systemPrompt = `あなたは親切なAIアシスタントです．
+    ユーザーとの過去のやり取りから得た情報を活用して，パーソナライズされた応答をおこなってください．
+    ${context}
+    上記の情報がある場合は，自然な形で活用してください．`;
+
     let fullResponse = '';
     // コールバック定義
     const callbacks: StreamCallbacks = {
@@ -204,9 +229,40 @@ ipcMain.handle('memory-clear', async () => {
     return { success: true };
 });
 
+// IPC: プロファイル関連を追加
+ipcMain.handle('profile-get-all', () => {
+    return userProfile.getAll();
+});
+
+ipcMain.handle('profile-set', (_event, category: string, key: string, value: string) => {
+    return userProfile.set(category as any, key, value);
+});
+
+ipcMain.handle('profile-delete', (_event, category: string, key: string) => {
+    return userProfile.delete(category as any, key);
+});
+
+ipcMain.handle('profile-clear', () => {
+    userProfile.clear();
+    return { success: true };
+});
+
+ipcMain.handle('profile-stats', () => {
+    return userProfile.getStats();
+});
+
+// IPC: メンテナンス手動実行
+ipcMain.handle('memory-maintenance', async () => {
+    return await memoryLifecycle.runMaintenance();
+});
+
 app.whenReady().then(async () => {
+    // 会話ストレージ初期化
     conversationStorage = new ConversationStorage();
     await conversationStorage.initialize();
+
+    // ユーザープロファイルの初期化
+    userProfile = new UserProfile();
 
     // ベクトルストア初期化
     const embeddingProvider = createEmbeddingProvider('xenova');
@@ -214,9 +270,23 @@ app.whenReady().then(async () => {
     await vectorStore.initialize();
 
     // メモリマネージャ初期化
-    memoryManager = new MemoryManager(vectorStore);
+    memoryManager = new MemoryManager(vectorStore, userProfile);
+
+    // ライフサイクル管理初期化
+    memoryLifecycle = new MemoryLifecycle(vectorStore, llmRouter);
+
+    console.log('[App] Memory system initialized');
 
     await createWindow();
+
+    // 定期メンテ（1時間ごと）
+    setInterval(async () => {
+        try {
+            await memoryLifecycle.runMaintenance();
+        } catch (error) {
+            console.error('[App] Mintenance failed:', error);
+        }
+    }, 60 * 60 * 1000); // 1時間
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
