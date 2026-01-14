@@ -1,4 +1,6 @@
 declare global {
+  type ProviderPreference = 'local-first' | 'api-first' | 'local-only' | 'api-only';
+
   interface ElectronAPI {
     // 会話管理
     conversationCreate: (title?: string) => Promise<Conversation>;
@@ -15,8 +17,8 @@ declare global {
     removeLLMListeners: (channel: string) => void;
 
     // プロバイダ設定
-    getProviderPreference: () => Promise<string>;
-    setProviderPreference: (preference: string) => Promise<{ success: boolean }>;
+    getProviderPreference: () => Promise<ProviderPreference>;
+    setProviderPreference: (preference: ProviderPreference) => Promise<{ success: boolean }>;
   }
 
   interface Window {
@@ -46,4 +48,4 @@ declare global {
   }
 }
 
-export {};
+export { };

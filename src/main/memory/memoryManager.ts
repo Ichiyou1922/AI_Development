@@ -1,11 +1,11 @@
 import { VectorStore } from './vectorStore.js';
 import { UserProfile, ProfileCategory } from './userProfile.js';
-import { 
-    MemoryEntry, 
-    MemoryMetadata, 
-    MemoryType, 
+import {
+    MemoryEntry,
+    MemoryMetadata,
+    MemoryType,
     SearchResult,
-    EmbeddingProvider 
+    EmbeddingProvider
 } from './types.js';
 
 /**
@@ -56,106 +56,106 @@ export class MemoryManager {
             extractor: (match: RegExpMatchArray, msg: string) => string;
             profileUpdate?: (match: RegExpMatchArray) => { category: ProfileCategory; key: string; value: string };
         }> = [
-            // 名前の自己紹介
-            {
-                regex: /(?:私の名前は|僕の名前は|名前は|私は)(.+?)(?:です|だよ|と申します|といいます|っていいます)/,
-                type: 'fact',
-                importance: 0.9,
-                tags: ['user', 'name', 'identity'],
-                extractor: (match) => `ユーザーの名前は「${match[1].trim()}」である`,
-                profileUpdate: (match) => ({
-                    category: 'identity',
-                    key: '名前',
-                    value: match[1].trim(),
-                }),
-            },
-            // 年齢
-            {
-                regex: /(?:私は|僕は)?(\d+)歳(?:です|だよ)?/,
-                type: 'fact',
-                importance: 0.7,
-                tags: ['user', 'age', 'identity'],
-                extractor: (match) => `ユーザーは${match[1]}歳である`,
-                profileUpdate: (match) => ({
-                    category: 'identity',
-                    key: '年齢',
-                    value: `${match[1]}歳`,
-                }),
-            },
-            // 職業
-            {
-                regex: /(?:私は|僕は)(.+?)(?:として働いて|で働いて|をして|の仕事をして)/,
-                type: 'fact',
-                importance: 0.8,
-                tags: ['user', 'job', 'identity'],
-                extractor: (match) => `ユーザーの職業は「${match[1].trim()}」である`,
-                profileUpdate: (match) => ({
-                    category: 'occupation',
-                    key: '職業',
-                    value: match[1].trim(),
-                }),
-            },
-            // 趣味
-            {
-                regex: /(?:趣味は|好きなことは)(.+?)(?:です|だよ|かな)/,
-                type: 'preference',
-                importance: 0.6,
-                tags: ['user', 'hobby', 'preference'],
-                extractor: (match) => `ユーザーの趣味は「${match[1].trim()}」である`,
-                profileUpdate: (match) => ({
-                    category: 'preference',
-                    key: '趣味',
-                    value: match[1].trim(),
-                }),
-            },
-            // 好み（好き）
-            {
-                regex: /(?:私は|僕は)?(.+?)が(?:好き|大好き)(?:です|だよ|なんだ)?/,
-                type: 'preference',
-                importance: 0.5,
-                tags: ['user', 'like', 'preference'],
-                extractor: (match) => `ユーザーは「${match[1].trim()}」が好きである`,
-                profileUpdate: (match) => ({
-                    category: 'preference',
-                    key: `好き_${match[1].trim()}`,
-                    value: match[1].trim(),
-                }),
-            },
-            // 好み（嫌い）
-            {
-                regex: /(?:私は|僕は)?(.+?)が(?:嫌い|苦手)(?:です|だよ|なんだ)?/,
-                type: 'preference',
-                importance: 0.5,
-                tags: ['user', 'dislike', 'preference'],
-                extractor: (match) => `ユーザーは「${match[1].trim()}」が嫌い/苦手である`,
-                profileUpdate: (match) => ({
-                    category: 'preference',
-                    key: `嫌い_${match[1].trim()}`,
-                    value: match[1].trim(),
-                }),
-            },
-            // 住んでいる場所
-            {
-                regex: /(?:私は|僕は)?(.+?)に住んで(?:います|いる|るよ)/,
-                type: 'fact',
-                importance: 0.7,
-                tags: ['user', 'location', 'identity'],
-                extractor: (match) => `ユーザーは「${match[1].trim()}」に住んでいる`,
-                profileUpdate: (match) => ({
-                    category: 'location',
-                    key: '居住地',
-                    value: match[1].trim(),
-                }),
-            },
-            // 覚えておいて系
-            {
-                regex: /(?:覚えておいて|忘れないで|記憶して)[：:、]?(.+)/,
-                type: 'fact',
-                importance: 0.9,
-                tags: ['user', 'explicit_memory'],
-                extractor: (match) => match[1].trim(),
-            },
-        ];
+                // 名前の自己紹介
+                {
+                    regex: /(?:私の名前は|僕の名前は|名前は|私は)([^、。\n]+?)(?:です|だよ|と申します|といいます|っていいます)/,
+                    type: 'fact',
+                    importance: 0.9,
+                    tags: ['user', 'name', 'identity'],
+                    extractor: (match) => `ユーザーの名前は「${match[1].trim()}」である`,
+                    profileUpdate: (match) => ({
+                        category: 'identity',
+                        key: '名前',
+                        value: match[1].trim(),
+                    }),
+                },
+                // 年齢
+                {
+                    regex: /(?:私は|僕は)?(\d+)歳(?:です|だよ)?/,
+                    type: 'fact',
+                    importance: 0.7,
+                    tags: ['user', 'age', 'identity'],
+                    extractor: (match) => `ユーザーは${match[1]}歳である`,
+                    profileUpdate: (match) => ({
+                        category: 'identity',
+                        key: '年齢',
+                        value: `${match[1]}歳`,
+                    }),
+                },
+                // 職業
+                {
+                    regex: /(?:私は|僕は)([^、。\n]+?)(?:として働いて|で働いて|をして|の仕事をして)/,
+                    type: 'fact',
+                    importance: 0.8,
+                    tags: ['user', 'job', 'identity'],
+                    extractor: (match) => `ユーザーの職業は「${match[1].trim()}」である`,
+                    profileUpdate: (match) => ({
+                        category: 'occupation',
+                        key: '職業',
+                        value: match[1].trim(),
+                    }),
+                },
+                // 趣味
+                {
+                    regex: /(?:趣味は|好きなことは)([^、。\n]+?)(?:です|だよ|かな)/,
+                    type: 'preference',
+                    importance: 0.6,
+                    tags: ['user', 'hobby', 'preference'],
+                    extractor: (match) => `ユーザーの趣味は「${match[1].trim()}」である`,
+                    profileUpdate: (match) => ({
+                        category: 'preference',
+                        key: '趣味',
+                        value: match[1].trim(),
+                    }),
+                },
+                // 好み（好き）
+                {
+                    regex: /(?:私は|僕は)?([^、。\n]+?)が(?:好き|大好き)(?:です|だよ|なんだ)?/,
+                    type: 'preference',
+                    importance: 0.5,
+                    tags: ['user', 'like', 'preference'],
+                    extractor: (match) => `ユーザーは「${match[1].trim()}」が好きである`,
+                    profileUpdate: (match) => ({
+                        category: 'preference',
+                        key: `好き_${match[1].trim()}`,
+                        value: match[1].trim(),
+                    }),
+                },
+                // 好み（嫌い）
+                {
+                    regex: /(?:私は|僕は)?([^、。\n]+?)が(?:嫌い|苦手)(?:です|だよ|なんだ)?/,
+                    type: 'preference',
+                    importance: 0.5,
+                    tags: ['user', 'dislike', 'preference'],
+                    extractor: (match) => `ユーザーは「${match[1].trim()}」が嫌い/苦手である`,
+                    profileUpdate: (match) => ({
+                        category: 'preference',
+                        key: `嫌い_${match[1].trim()}`,
+                        value: match[1].trim(),
+                    }),
+                },
+                // 住んでいる場所
+                {
+                    regex: /(?:私は|僕は)?([^、。\n]+?)に住んで(?:います|いる|るよ)/,
+                    type: 'fact',
+                    importance: 0.7,
+                    tags: ['user', 'location', 'identity'],
+                    extractor: (match) => `ユーザーは「${match[1].trim()}」に住んでいる`,
+                    profileUpdate: (match) => ({
+                        category: 'location',
+                        key: '居住地',
+                        value: match[1].trim(),
+                    }),
+                },
+                // 覚えておいて系
+                {
+                    regex: /(?:覚えておいて|忘れないで|記憶して)[：:、]?(.+)/,
+                    type: 'fact',
+                    importance: 0.9,
+                    tags: ['user', 'explicit_memory'],
+                    extractor: (match) => match[1].trim(),
+                },
+            ];
 
         for (const pattern of patterns) {
             const match = userMessage.match(pattern.regex);
@@ -192,12 +192,20 @@ export class MemoryManager {
         const profileContext = this.userProfile.formatForPrompt();
         if (profileContext) {
             parts.push(profileContext);
+            console.log('[MemoryManager] Injected profile context:', profileContext.substring(0, 100) + '...');
+        } else {
+            console.log('[MemoryManager] No profile context to inject');
         }
 
         // 関連記憶
         const memories = await this.searchRelevantMemories(query, 3, 0.4);
         if (memories.length > 0) {
-            parts.push(this.formatMemoriesForPrompt(memories));
+            const memoryContext = this.formatMemoriesForPrompt(memories);
+            parts.push(memoryContext);
+            console.log('[MemoryManager] Injected relevant memories:', memories.length);
+            memories.forEach(m => console.log(`  - [${m.score.toFixed(2)}] ${m.entry.content}`));
+        } else {
+            console.log('[MemoryManager] No relevant memories found');
         }
 
         return parts.join('\n\n');
@@ -214,7 +222,7 @@ export class MemoryManager {
         // 重複チェック（類似の記憶が既にあるか）
         const existing = await this.vectorStore.search(info.content, 1);
         if (existing.length > 0 && existing[0].score > 0.9) {
-            console.log(`[MemoryManager] Similar memory exists, skipping: ${info.content}`);
+            console.log(`[MemoryManager] Similar memory exists, skipping: ${info.content} (score: ${existing[0].score})`);
             // 既存の記憶の重要度を上げる
             await this.vectorStore.update(existing[0].entry.id, {
                 metadata: {
@@ -246,7 +254,7 @@ export class MemoryManager {
         minScore: number = 0.5
     ): Promise<SearchResult[]> {
         const results = await this.vectorStore.search(query, limit);
-        
+
         // スコアでフィルタリング
         return results.filter(r => r.score >= minScore);
     }
