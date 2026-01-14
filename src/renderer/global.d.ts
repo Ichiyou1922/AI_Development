@@ -1,18 +1,48 @@
 declare global {
   interface ElectronAPI {
-    sendMessageStream(message: string): Promise<{ started: boolean }>;
-    getProviderPreference(): Promise<string>;
-    setProviderPreference(preference: string): Promise<void>;
-    clearHistory(): Promise<void>;
-    onLLMToken(callback: (token: string) => void): void;
-    onLLMDone(callback: (fullText: string) => void): void;
-    onLLMError(callback: (error: string) => void): void;
-    removeLLMListeners(): void;
-    removeAllListeners(): void;
+    // 会話管理
+    conversationCreate: (title?: string) => Promise<Conversation>;
+    conversationList: () => Promise<ConversationMeta[]>;
+    conversationLoad: (id: string) => Promise<Conversation | null>;
+    conversationDelete: (id: string) => Promise<{ success: boolean }>;
+    conversationGetActive: () => Promise<string | null>;
+
+    // メッセージ送信
+    sendMessageStream: (message: string) => Promise<{ started: boolean }>;
+    onLLMToken: (callback: (token: string) => void) => void;
+    onLLMDone: (callback: (fullText: string) => void) => void;
+    onLLMError: (callback: (error: string) => void) => void;
+    removeLLMListeners: (channel: string) => void;
+
+    // プロバイダ設定
+    getProviderPreference: () => Promise<string>;
+    setProviderPreference: (preference: string) => Promise<{ success: boolean }>;
   }
 
   interface Window {
     electronAPI: ElectronAPI;
+  }
+
+  interface Message {
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+    timestamp: number;
+  }
+
+  interface ConversationMeta {
+    id: string;
+    title: string;
+    createdAt: number;
+    updatedAt: number;
+    messageCount: number;
+  }
+
+  interface Conversation {
+    id: string;
+    title: string;
+    createdAt: number;
+    updatedAt: number;
+    messages: Message[];
   }
 }
 

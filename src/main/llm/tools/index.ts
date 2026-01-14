@@ -5,3 +5,4 @@ export * from './calculator.js';
 export * from './notification.js';
 export * from './appLauncher.js';
 export * from './nightMode.js';
+export * from './fileBrowser.js';

@@ -35,13 +35,13 @@ export const notificationTool: Tool = {
         const safeTitle = title.replace(/'/g, "'\\''");
         const safeMessage = message.replace(/'/g, "'\\''");
 
-        const command = `notify-send -u ${urgency} '${safeTitle}' '${safeMessage}'}`;
+        const command = `notify-send -u ${urgency} '${safeTitle}' '${safeMessage}'`;
         const result = await executeCommand(command);
 
         if (result.success) {
             return {
                 success: true,
-                result: `通知を送信しました: &{title}`,
+                result: `通知を送信しました: ${title}`,
             };
         } else {
             return {

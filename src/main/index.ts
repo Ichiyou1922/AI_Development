@@ -4,25 +4,24 @@ import * as dotenv from 'dotenv';
 import { LLMRouter, ProviderPreference } from './llm/router.js';
 import { LLMMessage, StreamCallbacks } from './llm/types.js';
 import { HistoryManager } from './llm/history.js';
-
+import { ConversationStorage } from './storage/conversationStorage.js';
+import { Conversation, ConversationMeta, StoredMessage } from './storage/types.js';
 // read .env
 dotenv.config();
 
 const llmRouter = new LLMRouter('local-first');
-const historyManager = new HistoryManager({
-    maxMessages: 50,
-    maxTokensEstimate: 8000,
-});
+
+// ストレージのインスタンス
+let conversationStorage: ConversationStorage;
+// 現在アクティブな会話ID
+let activeConversationId: string | null = null;
 
 let mainWindow: BrowserWindow | null = null;
 
 async function createWindow(): Promise<void> {
-    //履歴をロード
-    await historyManager.load();
-
     mainWindow = new BrowserWindow({
-        width: 800,
-        height: 600,
+        width: 10000,
+        height: 700,
         webPreferences: {
             preload: path.join(__dirname, '../preload/index.js'),
             nodeIntegration: false, // to disable Node.js integration in Renderer
@@ -38,23 +37,78 @@ async function createWindow(): Promise<void> {
     });
 }
 
-// 非ストリーミングのメッセージハンドラは削除（ストリーミングのみ利用）
+// 新規会話を作成
+ipcMain.handle('conversation-create', async (_event, title?: string) => {
+    const conversation = await conversationStorage.create(title);
+    activeConversationId = conversation.id;
+    return conversation;
+});
+
+// 会話一覧を取得
+ipcMain.handle('conversation-list', async () => {
+    return await conversationStorage.listAll();
+});
+
+ipcMain.handle('conversation-load', async (_event, id: string) => {
+    const conversation = await conversationStorage.load(id);
+    if (conversation) {
+        activeConversationId = id;
+    }
+    return conversation;
+});
+
+// 会話を削除
+ipcMain.handle('conversation-delete', async (_event, id: string) => {
+    const success = await conversationStorage.delete(id);
+    if (success && activeConversationId === id) {
+        activeConversationId = null;
+    }
+    return { success };
+});
+
+// 現在のアクティブ会話IDを取得
+ipcMain.handle('conversation-get-active', () => {
+    return activeConversationId;
+});
+
+// メッセージ送信IPC
 
 // IPC: メッセージストリーム
 ipcMain.handle('send-message-stream', async (_event, message: string) => {
-    // 会話履歴に追加
-    historyManager.add({ role: 'user', content: message });
+    // アクティブ名会話がなければ新規作成
+    if (!activeConversationId) {
+        const newConv = await conversationStorage.create();
+        activeConversationId = newConv.id;
+    }
 
+    // ユーザーメッセージを保存
+    await conversationStorage.addMessage(activeConversationId, 'user', message);
+
+    // 会話履歴をLLM形式に変換
+    const conversation = await conversationStorage.load(activeConversationId);
+    if (!conversation) {
+        mainWindow?.webContents.send('llm-error', { error: 'Conversation not found' });
+        return { started: false };
+    }
+
+    const history: LLMMessage[] = conversation.messages.map(m => ({
+        role: m.role,
+        content: m.content,
+    }));
+
+    let fullResponse = '';
     // コールバック定義
     const callbacks: StreamCallbacks = {
         onToken: (token) => {
+            fullResponse += token;
             // Rendererにトークンを送信
             mainWindow?.webContents.send('llm-token', { token });
         },
-        onDone: (fullText) => {
-            // 会話履歴に追加
-            historyManager.add({ role: 'assistant', content: fullText });
-            historyManager.save();
+        onDone: async (fullText) => {
+            // アシスタントメッセージを保存
+            if (activeConversationId) {
+                await conversationStorage.addMessage(activeConversationId, 'assistant', fullText);
+            }
             // Rendererに完了通知
             mainWindow?.webContents.send('llm-done', { fullText });
         },
@@ -65,7 +119,7 @@ ipcMain.handle('send-message-stream', async (_event, message: string) => {
     };
 
     // ストリーミング開始
-    await llmRouter.sendMessageStream(historyManager.getHistory(), callbacks);
+    await llmRouter.sendMessageStream(history, callbacks);
 
     // 戻り値
     return { started: true };
@@ -82,34 +136,16 @@ ipcMain.handle('set-provider-preference', (_event, preference: ProviderPreferenc
     return { success: true };
 });
 
-// IPC: 会話履歴のクリア
-ipcMain.handle('clear-history', async () => {
-    historyManager.clear();
-    await historyManager.save();
-    return { success: true };
-});
-
-// IPC: 履歴情報の取得（デバッグ）
-ipcMain.handle('get-history-info', () => {
-    return {
-        messageCount: historyManager.getMessageCount(),
-        estimatedTokens: historyManager.getEstimatedTokens(),
-        savePath: historyManager.getSavePath(),
-    };
-});
-
-app.whenReady().then(() => {
-    createWindow();
+app.whenReady().then(async () => {
+    conversationStorage = new ConversationStorage();
+    await conversationStorage.initialize();
+    await createWindow();
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
             createWindow();
         }
     });
-});
-
-app.on('before-quit', async () => {
-    await historyManager.save();
 });
 
 app.on('window-all-closed', () => {

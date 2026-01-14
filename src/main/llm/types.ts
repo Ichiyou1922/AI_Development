@@ -1,5 +1,5 @@
 export interface LLMMessage {
-    role: 'user' | 'assistant' | 'system';
+    role: 'user' | 'assistant' | 'system' ;
     content: string;
 }
 

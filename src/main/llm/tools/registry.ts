@@ -4,6 +4,7 @@ import { calculatorTool } from './calculator.js';
 import { notificationTool } from './notification.js';
 import { appLauncherTool } from './appLauncher.js';
 import { nightModeTool } from './nightMode.js';
+import { readFilePathTool, listDirTool, searchFilesTool } from './fileBrowser.js';
 
 export class ToolRegistry {
     private tools: Map<string, Tool> = new Map();
@@ -15,6 +16,9 @@ export class ToolRegistry {
         this.register(notificationTool);
         this.register(appLauncherTool);
         this.register(nightModeTool);
+        this.register(readFilePathTool);
+        this.register(listDirTool);
+        this.register(searchFilesTool);
     }
 
     register(tool: Tool): void {

@@ -1,141 +1,202 @@
-// ProviderPreference はグローバルな型定義で提供される
+// DOM要素
+const chatContainer = document.getElementById('chat-container') as HTMLDivElement;
+const messageInput = document.getElementById('message-input') as HTMLTextAreaElement;
+const sendBtn = document.getElementById('send-btn') as HTMLButtonElement;
+const conversationListEl = document.getElementById('conversation-list') as HTMLUListElement;
+const newConversationBtn = document.getElementById('new-conversation-btn') as HTMLButtonElement;
 
-type ProviderPreference = 'local-first' | 'api-first' | 'local-only' | 'api-only';
+// 状態
+let isStreaming = false;
+let currentAssistantMessageEl: HTMLDivElement | null = null;
 
-const messagesContainer = document.getElementById('messages') as HTMLDivElement;
-const userInput = document.getElementById('user-input') as HTMLInputElement;
-const sendButton = document.getElementById('send-button') as HTMLButtonElement;
-const providerSelect = document.getElementById('provider-select') as HTMLSelectElement;
-const clearButton = document.getElementById('clear-button') as HTMLButtonElement;
+// ============================================================
+// 会話一覧の描画
+// ============================================================
 
-let currentAssistantMessage: HTMLDivElement | null = null;
-let currentContentDiv: HTMLDivElement | null = null;
+async function renderConversationList(): Promise<void> {
+    const conversations = await window.electronAPI.conversationList();
+    const activeId = await window.electronAPI.conversationGetActive();
 
-function addMessage(role: 'user' | 'assistant', text: string, provider?: string): HTMLDivElement {
-  const messageDiv = document.createElement('div');
-  messageDiv.className = `message ${role}`;
-  
-  const roleLabel = document.createElement('div');
-  roleLabel.className = 'role';
-  if (role === 'assistant' && provider) {
-    roleLabel.textContent = `AI (${provider})`;
-  } else {
-    roleLabel.textContent = role === 'user' ? 'You' : 'AI';
-  }
-  
-  const contentDiv = document.createElement('div');
-  contentDiv.className = 'content';
-  contentDiv.textContent = text;
-  
-  messageDiv.appendChild(roleLabel);
-  messageDiv.appendChild(contentDiv);
-  messagesContainer.appendChild(messageDiv);
-  
-  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    conversationListEl.innerHTML = '';
 
-  return messageDiv;
+    for (const conv of conversations) {
+        const li = document.createElement('li');
+        li.className = 'conversation-item' + (conv.id === activeId ? ' active' : '');
+        li.dataset.id = conv.id;
+
+        const date = new Date(conv.updatedAt).toLocaleDateString('ja-JP');
+        
+        li.innerHTML = `
+            <span class="title">${escapeHtml(conv.title)}</span>
+            <button class="delete-btn" data-id="${conv.id}">×</button>
+            <div class="meta">${date} · ${conv.messageCount}件</div>
+        `;
+
+        // 会話選択
+        li.addEventListener('click', async (e) => {
+            if ((e.target as HTMLElement).classList.contains('delete-btn')) return;
+            await loadConversation(conv.id);
+        });
+
+        conversationListEl.appendChild(li);
+    }
+
+    // 削除ボタンのイベント
+    document.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const id = (e.target as HTMLElement).dataset.id;
+            if (id && confirm('この会話を削除しますか？')) {
+                await window.electronAPI.conversationDelete(id);
+                await renderConversationList();
+                chatContainer.innerHTML = '';
+            }
+        });
+    });
 }
 
-function createEmptyAssistantMessage(): void {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'message assistant';
+// ============================================================
+// 会話のロード
+// ============================================================
 
-    const roleLabel = document.createElement('div');
-    roleLabel.className = 'role';
-    roleLabel.textContent = 'AI';
+async function loadConversation(id: string): Promise<void> {
+    const conversation = await window.electronAPI.conversationLoad(id);
+    if (!conversation) return;
 
-    const contentDiv = document.createElement('div');
-    contentDiv.className = 'content';
-    contentDiv.textContent = '';
+    chatContainer.innerHTML = '';
 
-    messageDiv.appendChild(roleLabel);
-    messageDiv.appendChild(contentDiv);
-    messagesContainer.appendChild(messageDiv);
-
-    // 参照を保持
-    currentAssistantMessage = messageDiv;
-    currentContentDiv = contentDiv;
-
-    messagesContainer.scrollTop = messagesContainer.scrollHeight;
- }
-
- // token追記
- function appendToken(token: string): void {
-    if (currentContentDiv) {
-        currentContentDiv.textContent += token;
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    for (const msg of conversation.messages) {
+        appendMessage(msg.role, msg.content);
     }
- }
 
- // ストリーミング終了
- function finalizeStream(): void {
-    currentAssistantMessage = null;
-    currentContentDiv = null;
- }
+    await renderConversationList();
+    scrollToBottom();
+}
 
- async function sendMessageStream(): Promise<void> {
-    const message = userInput.value.trim();
-    if (!message) return;
+// ============================================================
+// メッセージ表示
+// ============================================================
 
-    userInput.value = '';
-    sendButton.disabled = true;
-    addMessage('user', message);
+function appendMessage(role: string, content: string): HTMLDivElement {
+    const div = document.createElement('div');
+    div.className = `message ${role}`;
+    div.innerHTML = formatContent(content);
+    chatContainer.appendChild(div);
+    return div;
+}
 
-    // 空のアシスタントメッセージ
-    createEmptyAssistantMessage();
+function formatContent(content: string): string {
+    // 簡易的なコードブロック処理
+    return escapeHtml(content)
+        .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\n/g, '<br>');
+}
 
-    // リスナー登録
-    // 既存のリスナーが残っているとトークンが重複するため、先に解除する
-    //window.electronAPI.removeAllListeners();
-    window.electronAPI.onLLMToken((token) => {
-      appendToken(token);
-    });
+function escapeHtml(text: string): string {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
 
-    window.electronAPI.onLLMDone((_fullText) => {
-        finalizeStream();
-        window.electronAPI.removeAllListeners();
-        sendButton.disabled = false;
-        userInput.focus();
-    });
+function scrollToBottom(): void {
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+}
 
-    window.electronAPI.onLLMError((error) => {
-        if (currentContentDiv) {
-            currentContentDiv.textContent = `エラー: ${error}`;
-        }
-        finalizeStream();
-        window.electronAPI.removeAllListeners();
-        sendButton.disabled = false;
-        userInput.focus();
-    });
+// ============================================================
+// メッセージ送信
+// ============================================================
+
+async function sendMessage(): Promise<void> {
+    const message = messageInput.value.trim();
+    if (!message || isStreaming) return;
+
+    isStreaming = true;
+    sendBtn.disabled = true;
+    messageInput.value = '';
+
+    // ユーザーメッセージを表示
+    appendMessage('user', message);
+    scrollToBottom();
+
+    // アシスタントメッセージ用の要素を準備
+    currentAssistantMessageEl = appendMessage('assistant', '');
 
     // ストリーミング開始
     await window.electronAPI.sendMessageStream(message);
- }
-
- sendButton.addEventListener('click', sendMessageStream);
-
- userInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        sendMessageStream();
-    }
- });
-
-async function initializeUI(): Promise<void> {
-  // 現在のプロバイダー設定を取得
-  const preference = await window.electronAPI.getProviderPreference();
-  providerSelect.value = preference;
 }
 
-providerSelect.addEventListener('change', async () => {
-  const preference = providerSelect.value as ProviderPreference;
-  await window.electronAPI.setProviderPreference(preference);
+// ============================================================
+// ストリーミングイベント
+// ============================================================
+
+function setupStreamListeners(): void {
+    // 既存リスナーを削除
+    window.electronAPI.removeLLMListeners('llm-token');
+    window.electronAPI.removeLLMListeners('llm-done');
+    window.electronAPI.removeLLMListeners('llm-error');
+
+    window.electronAPI.onLLMToken((token) => {
+        if (currentAssistantMessageEl) {
+            const current = currentAssistantMessageEl.textContent || '';
+            currentAssistantMessageEl.innerHTML = formatContent(current + token);
+            scrollToBottom();
+        }
+    });
+
+    window.electronAPI.onLLMDone((fullText) => {
+        if (currentAssistantMessageEl) {
+            currentAssistantMessageEl.innerHTML = formatContent(fullText);
+        }
+        isStreaming = false;
+        sendBtn.disabled = false;
+        currentAssistantMessageEl = null;
+        renderConversationList();  // タイトル更新のため
+    });
+
+    window.electronAPI.onLLMError((error) => {
+        console.error('LLM Error:', error);
+        if (currentAssistantMessageEl) {
+            currentAssistantMessageEl.innerHTML = `<span style="color: #e94560;">エラー: ${escapeHtml(error)}</span>`;
+        }
+        isStreaming = false;
+        sendBtn.disabled = false;
+        currentAssistantMessageEl = null;
+    });
+}
+
+// ============================================================
+// イベントバインド
+// ============================================================
+
+sendBtn.addEventListener('click', sendMessage);
+
+messageInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+    }
 });
 
-clearButton.addEventListener('click', async () => {
-  await window.electronAPI.clearHistory();
-  messagesContainer.innerHTML = '';
+newConversationBtn.addEventListener('click', async () => {
+    await window.electronAPI.conversationCreate();
+    chatContainer.innerHTML = '';
+    await renderConversationList();
 });
 
+// ============================================================
 // 初期化
-initializeUI();
-userInput.focus();
+// ============================================================
+
+async function initialize(): Promise<void> {
+    setupStreamListeners();
+    await renderConversationList();
+
+    // アクティブな会話があればロード
+    const activeId = await window.electronAPI.conversationGetActive();
+    if (activeId) {
+        await loadConversation(activeId);
+    }
+}
+
+initialize();
