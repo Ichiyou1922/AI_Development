@@ -1,6 +1,9 @@
 import { Tool, ToolDefinition, ToolResult } from './types.js';
 import { currentTimeTool } from './currentTime.js';
 import { calculatorTool } from './calculator.js';
+import { notificationTool } from './notification.js';
+import { appLauncherTool } from './appLauncher.js';
+import { nightModeTool } from './nightMode.js';
 
 export class ToolRegistry {
     private tools: Map<string, Tool> = new Map();
@@ -8,7 +11,10 @@ export class ToolRegistry {
     constructor() {
         // デフォルトツールの登録
         this.register(currentTimeTool);
-        this.register(calculatorTool)
+        this.register(calculatorTool);
+        this.register(notificationTool);
+        this.register(appLauncherTool);
+        this.register(nightModeTool);
     }
 
     register(tool: Tool): void {
