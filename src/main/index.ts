@@ -3,16 +3,23 @@ import * as path from 'path';
 import * as dotenv from 'dotenv';
 import { LLMRouter, ProviderPreference } from './llm/router.js';
 import { LLMMessage, StreamCallbacks } from './llm/types.js';
+import { HistoryManager } from './llm/history.js';
 
 // read .env
 dotenv.config();
 
 const llmRouter = new LLMRouter('local-first');
-const conversationHistory: LLMMessage[] = [];
+const historyManager = new HistoryManager({
+    maxMessages: 50,
+    maxTokensEstimate: 8000,
+});
 
 let mainWindow: BrowserWindow | null = null;
 
-function createWindow(): void {
+async function createWindow(): Promise<void> {
+    //履歴をロード
+    await historyManager.load();
+
     mainWindow = new BrowserWindow({
         width: 800,
         height: 600,
@@ -36,7 +43,7 @@ function createWindow(): void {
 // IPC: メッセージストリーム
 ipcMain.handle('send-message-stream', async (_event, message: string) => {
     // 会話履歴に追加
-    conversationHistory.push({ role: 'user', content: message });
+    historyManager.add({ role: 'user', content: message });
 
     // コールバック定義
     const callbacks: StreamCallbacks = {
@@ -46,9 +53,10 @@ ipcMain.handle('send-message-stream', async (_event, message: string) => {
         },
         onDone: (fullText) => {
             // 会話履歴に追加
-            conversationHistory.push({ role: 'assistant', content: fullText });
+            historyManager.add({ role: 'assistant', content: fullText });
+            historyManager.save();
             // Rendererに完了通知
-            mainWindow?.webContents.send('llmdone', { fullText });
+            mainWindow?.webContents.send('llm-done', { fullText });
         },
         onError: (error) => {
             // Rendererにエラー通知
@@ -57,7 +65,7 @@ ipcMain.handle('send-message-stream', async (_event, message: string) => {
     };
 
     // ストリーミング開始
-    await llmRouter.sendMessageStream(conversationHistory, callbacks);
+    await llmRouter.sendMessageStream(historyManager.getHistory(), callbacks);
 
     // 戻り値
     return { started: true };
@@ -75,9 +83,19 @@ ipcMain.handle('set-provider-preference', (_event, preference: ProviderPreferenc
 });
 
 // IPC: 会話履歴のクリア
-ipcMain.handle('clear-history', () => {
-    conversationHistory.length = 0;
+ipcMain.handle('clear-history', async () => {
+    historyManager.clear();
+    await historyManager.save();
     return { success: true };
+});
+
+// IPC: 履歴情報の取得（デバッグ）
+ipcMain.handle('get-history-info', () => {
+    return {
+        messageCount: historyManager.getMessageCount(),
+        estimatedTokens: historyManager.getEstimatedTokens(),
+        savePath: historyManager.getSavePath(),
+    };
 });
 
 app.whenReady().then(() => {
@@ -88,6 +106,10 @@ app.whenReady().then(() => {
             createWindow();
         }
     });
+});
+
+app.on('before-quit', async () => {
+    await historyManager.save();
 });
 
 app.on('window-all-closed', () => {

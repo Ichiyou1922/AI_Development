@@ -2,19 +2,22 @@ import { LLMMessage, LLMProvider, StreamCallbacks } from "./types.js";
 import { OllamaProvider } from "./ollama.js";
 import { AnthropicBeta } from "@anthropic-ai/sdk/resources";
 import { AnthropicProvider } from "./anthropic.js";
+import { ToolRegistry } from "./tools/index.js";
 
 export type ProviderPreference = 'local-first' | 'api-first' | 'local-only' | 'api-only';
 
 export class LLMRouter {
     private providers: LLMProvider[] = [];
     private preference: ProviderPreference;
+    private toolRegistry: ToolRegistry;
 
     constructor(preference: ProviderPreference = 'local-first') {
         this.preference = preference;
+        this.toolRegistry = new ToolRegistry();
 
         // プロバイダ登録
         this.providers.push(new OllamaProvider());
-        this.providers.push(new AnthropicProvider(process.env.ANTHROPIC_API_KEY));
+        this.providers.push(new AnthropicProvider(process.env.ANTHROPIC_API_KEY, this.toolRegistry));
     }
 
     // 非ストリーミング sendMessage は削除。ストリーミングのみ使用。

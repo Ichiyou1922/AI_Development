@@ -86,7 +86,7 @@ function createEmptyAssistantMessage(): void {
 
     // リスナー登録
     // 既存のリスナーが残っているとトークンが重複するため、先に解除する
-    window.electronAPI.removeAllListeners();
+    //window.electronAPI.removeAllListeners();
     window.electronAPI.onLLMToken((token) => {
       appendToken(token);
     });
