@@ -3,13 +3,15 @@ import * as path from 'path';
 import * as dotenv from 'dotenv';
 import { LLMRouter, ProviderPreference } from './llm/router.js';
 import { LLMMessage, StreamCallbacks } from './llm/types.js';
-import { HistoryManager } from './llm/history.js';
 import { ConversationStorage } from './storage/conversationStorage.js';
-import { Conversation, ConversationMeta, StoredMessage } from './storage/types.js';
+import { VectorStore, createEmbeddingProvider, MemoryManager } from './memory/index.js';
+
 // read .env
 dotenv.config();
 
 const llmRouter = new LLMRouter('local-first');
+let vectorStore: VectorStore;
+let memoryManager: MemoryManager;
 
 // ストレージのインスタンス
 let conversationStorage: ConversationStorage;
@@ -84,6 +86,18 @@ ipcMain.handle('send-message-stream', async (_event, message: string) => {
     // ユーザーメッセージを保存
     await conversationStorage.addMessage(activeConversationId, 'user', message);
 
+    // ユーザーメッセージに関連する記憶を検索
+    let relevantMemories: string = '';
+    try {
+        const memoryResults = await memoryManager.searchRelevantMemories(message, 5, 0.5);
+        if (memoryResults.length > 0) {
+            relevantMemories = memoryManager.formatMemoriesForPrompt(memoryResults);
+            console.log('[Main] Found relevant memories:', memoryResults.length);
+        }
+    } catch (error) {
+        console.error('[Main] Failed to search memories:', error);
+    }
+
     // 会話履歴をLLM形式に変換
     const conversation = await conversationStorage.load(activeConversationId);
     if (!conversation) {
@@ -95,6 +109,15 @@ ipcMain.handle('send-message-stream', async (_event, message: string) => {
         role: m.role,
         content: m.content,
     }));
+
+    // 記憶がある場合、最初のユーザーメッセージの前にシステムメッセージとして注入
+    if (relevantMemories && history.length > 0) {
+        // 最後のユーザーメッセージ（今送信したメッセージ）に記憶情報を追加
+        const lastMessage = history[history.length - 1];
+        if (lastMessage.role === 'user') {
+            lastMessage.content = relevantMemories + '\n' + lastMessage.content;
+        }
+    }
 
     let fullResponse = '';
     // コールバック定義
@@ -109,6 +132,18 @@ ipcMain.handle('send-message-stream', async (_event, message: string) => {
             if (activeConversationId) {
                 await conversationStorage.addMessage(activeConversationId, 'assistant', fullText);
             }
+
+            // ユーザーメッセージから重要な情報を抽出して記憶に保存
+            try {
+                const extractedInfo = memoryManager.extractInfoFromMessage(message, fullText);
+                if (extractedInfo) {
+                    await memoryManager.saveExtractedInfo(extractedInfo, activeConversationId || undefined);
+                    console.log('[Main] Saved memory from conversation:', extractedInfo.content);
+                }
+            } catch (error) {
+                console.error('[Main] Failed to extract/save memory:', error);
+            }
+
             // Rendererに完了通知
             mainWindow?.webContents.send('llm-done', { fullText });
         },
@@ -136,9 +171,51 @@ ipcMain.handle('set-provider-preference', (_event, preference: ProviderPreferenc
     return { success: true };
 });
 
+// IPC: 記憶のついか
+ipcMain.handle('memory-add', async (_event, content: string, metadata: any) => {
+    const entry = await vectorStore.add(content, metadata);
+    return entry;
+});
+
+// IPC: 記憶の検索
+ipcMain.handle('memory-search', async (_event, query: string, limit?: number) => {
+    const results = await vectorStore.search(query, limit);
+    return results;
+});
+
+// IPC: 記憶数の取得
+ipcMain.handle('memory-count', async () => {
+    return await vectorStore.count();
+});
+
+// IPC: 記憶の統計情報取得
+ipcMain.handle('memory-stats', async () => {
+    return await memoryManager.getStats();
+});
+
+// IPC: 全記憶の取得
+ipcMain.handle('memory-get-all', async () => {
+    return await vectorStore.getAll();
+});
+
+// IPC: 記憶のクリア
+ipcMain.handle('memory-clear', async () => {
+    await vectorStore.clear();
+    return { success: true };
+});
+
 app.whenReady().then(async () => {
     conversationStorage = new ConversationStorage();
     await conversationStorage.initialize();
+
+    // ベクトルストア初期化
+    const embeddingProvider = createEmbeddingProvider('xenova');
+    vectorStore = new VectorStore(embeddingProvider);
+    await vectorStore.initialize();
+
+    // メモリマネージャ初期化
+    memoryManager = new MemoryManager(vectorStore);
+
     await createWindow();
 
     app.on('activate', () => {
