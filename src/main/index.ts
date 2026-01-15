@@ -4,16 +4,31 @@ import * as dotenv from 'dotenv';
 import { LLMRouter, ProviderPreference } from './llm/router.js';
 import { LLMMessage, StreamCallbacks } from './llm/types.js';
 import { ConversationStorage } from './storage/conversationStorage.js';
-import { 
-    VectorStore, 
-    createEmbeddingProvider, 
+import {
+    VectorStore,
+    createEmbeddingProvider,
     MemoryManager,
     UserProfile,
-    MemoryLifecycle, 
+    MemoryLifecycle,
 } from './memory/index.js';
+import { WhisperProvider } from './voice/whisperProvider.js';
+import { MicrophoneCapture } from './voice/microphoneCapture.js';
+import { CaptureState } from './voice/types.js';
+import { VoicevoxProvider } from './voice/voicevoxProvider.js';
+import { AudioPlayer } from './voice/audioPlayer.js';
+import { VoiceDialogueController, DialogueState } from './voice/voiceDialogueController.js';
+import { DiscordBot, DiscordMessageContext, IdentifiedAudio } from './discord/index.js';
 
 let userProfile: UserProfile;
 let memoryLifecycle: MemoryLifecycle;
+let whisperProvider: WhisperProvider;
+let microphoneCapture: MicrophoneCapture;
+let voiceEnabled: boolean = false;
+let voicevoxProvider: VoicevoxProvider;
+let audioPlayer: AudioPlayer;
+let ttsEnabled: boolean = false;
+let voiceDialogue: VoiceDialogueController;
+let discordBot: DiscordBot | null = null;
 
 // read .env
 dotenv.config();
@@ -46,6 +61,204 @@ async function createWindow(): Promise<void> {
     mainWindow.on('closed', () => {
         mainWindow = null;
     });
+}
+
+async function processVoiceMessage(userText: string): Promise<string> {
+    if (!activeConversationId) {
+        const newConv = await conversationStorage.create();
+        activeConversationId = newConv.id;
+    }
+
+    // ユーザーメッセージを保存
+    await conversationStorage.addMessage(activeConversationId, 'user', userText);
+
+    let context = '';
+    try {
+        context = await memoryManager.buildContextForPrompt(userText);
+    } catch (error) {
+        console.error('[Voice] Context building failed:', error);
+    }
+
+    // conversation load
+    const conversation = await conversationStorage.load(activeConversationId);
+    if (!conversation) {
+        throw new Error('Conversation not found');
+    }
+
+    const history: LLMMessage[] = conversation.messages.map(m => ({
+        role: m.role,
+        content: m.content,
+    }));
+
+    // LLM call (not streaming)
+    let fullResponse = '';
+
+    await new Promise<void>((resolve, reject) => {
+        llmRouter.sendMessageStream(history, {
+            onToken: (token) => {
+                fullResponse += token;
+
+                mainWindow?.webContents.send('llm-token', { token });
+            },
+            onDone: async (fullText) => {
+                fullResponse = fullText;
+
+                // reserve assistant messages
+                await conversationStorage.addMessage(activeConversationId!, 'assistant', fullText);
+
+                // information input, memory update
+                try {
+                    const extractedInfo = memoryManager.extractInfoFromMessage(userText, fullText);
+                    if (extractedInfo) {
+                        await memoryManager.saveExtractedInfo(extractedInfo, activeConversationId!);
+                    }
+                } catch (error) {
+                    console.error('{Voice} Memory extraction failed:', error);
+                }
+
+                mainWindow?.webContents.send('llm-done', { fullText });
+                resolve();
+            },
+            onError: (error) => {
+                mainWindow?.webContents.send('llm-error', { error });
+                reject(new Error(error));
+            },
+        });
+    });
+
+    return fullResponse;
+}
+
+async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string> {
+    // アクティブ会話がなければ新規作成（Discord用に別管理も可能）
+    if (!activeConversationId) {
+        const newConv = await conversationStorage.create(`Discord: ${ctx.username}`);
+        activeConversationId = newConv.id;
+    }
+
+    // ユーザーメッセージを保存
+    await conversationStorage.addMessage(activeConversationId, 'user', ctx.content);
+
+    // 記憶検索
+    let context = '';
+    try {
+        context = await memoryManager.buildContextForPrompt(ctx.content);
+    } catch (error) {
+        console.error('[Discord] Context building failed:', error);
+    }
+
+    // 会話履歴を取得
+    const conversation = await conversationStorage.load(activeConversationId);
+    if (!conversation) {
+        throw new Error('Conversation not found');
+    }
+
+    const history: LLMMessage[] = conversation.messages.map(m => ({
+        role: m.role,
+        content: m.content,
+    }));
+
+    // LLM呼び出し
+    let fullResponse = '';
+
+    await new Promise<void>((resolve, reject) => {
+        llmRouter.sendMessageStream(history, {
+            onToken: (token) => {
+                fullResponse += token;
+            },
+            onDone: async (fullText) => {
+                fullResponse = fullText;
+
+                // アシスタントメッセージを保存
+                await conversationStorage.addMessage(activeConversationId!, 'assistant', fullText);
+
+                // 情報抽出・記憶保存
+                try {
+                    const extractedInfo = memoryManager.extractInfoFromMessage(ctx.content, fullText);
+                    if (extractedInfo) {
+                        await memoryManager.saveExtractedInfo(extractedInfo, activeConversationId!);
+                    }
+                } catch (error) {
+                    console.error('[Discord] Memory extraction failed:', error);
+                }
+
+                resolve();
+            },
+            onError: (error) => {
+                reject(new Error(error));
+            },
+        });
+    });
+
+    return fullResponse;
+}
+
+// Discord音声メッセージを処理
+async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<string> {
+    // whisper
+    const transcription = await whisperProvider.transcribe(audio.audioBuffer, 16000);
+    const userText = transcription.text.trim();
+
+    if (!userText) {
+        console.log('[Discord Voice] Empty transcription');
+        return '';
+    }
+
+    console.log((`[Discord Voice] ${audio.username}: "${userText}"`));
+
+    // message process
+    // if active conversation is not set, create new conversation
+    if (!activeConversationId) {
+        const newConv = await conversationStorage.create(`Discord Voice: ${audio.username}`);
+        activeConversationId = newConv.id;
+    }
+
+    // user message save
+    const messageWithSpeaker = `[${audio.username}]: ${userText}`;
+    await conversationStorage.addMessage(activeConversationId, 'user', messageWithSpeaker);
+
+    // memory search
+    let context = '';
+    try {
+        context = await memoryManager.buildContextForPrompt(userText);
+    } catch (error) {
+        console.log('[Discord Voice] Context building failed:', error);
+    }
+
+    // get conversation history
+    const conversation = await conversationStorage.load(activeConversationId);
+    if (!conversation) {
+        throw new Error('Conversaition not found');
+    }
+
+    const history: LLMMessage[] = conversation.messages.map(m => ({
+        role: m.role,
+        content: m.content,
+    }));
+
+    // LLM呼び出し
+    let fullResponse = '';
+
+    await new Promise<void>((resolve, reject) => {
+        llmRouter.sendMessageStream(history, {
+            onToken: (token) => {
+                fullResponse += token;
+            },
+            onDone: async (fullText) => {
+                fullResponse = fullText;
+
+                // assistant message save
+                await conversationStorage.addMessage(activeConversationId!, 'assistant', fullText);
+
+                resolve();
+            },
+            onError: (error) => {
+                reject(new Error(error));
+            },
+        });
+    });
+
+    return fullResponse;
 }
 
 // 新規会話を作成
@@ -196,6 +409,7 @@ ipcMain.handle('set-provider-preference', (_event, preference: ProviderPreferenc
     return { success: true };
 });
 
+// memory関連
 // IPC: 記憶のついか
 ipcMain.handle('memory-add', async (_event, content: string, metadata: any) => {
     const entry = await vectorStore.add(content, metadata);
@@ -256,6 +470,220 @@ ipcMain.handle('memory-maintenance', async () => {
     return await memoryLifecycle.runMaintenance();
 });
 
+// voicevox関連
+// IPC: 音声認識開始
+ipcMain.handle('voice-start', async () => {
+    if (!voiceEnabled) {
+        return { success: false, error: 'Voice system not enabled' };
+    }
+    microphoneCapture.startListening();
+    return { success: true };
+});
+
+// IPC: 音声認識停止
+ipcMain.handle('voice-stop', async () => {
+    if (!voiceEnabled) {
+        return { success: false, error: 'Voice system not enabled' };
+    }
+    microphoneCapture.stop();
+    return { success: true };
+});
+
+// IPC: 音声認識状態取得
+ipcMain.handle('voice-status', async () => {
+    return {
+        enabled: voiceEnabled,
+        state: voiceEnabled ? microphoneCapture.getState() : 'disabled',
+    };
+});
+
+// voicevox関連
+// IPC: テキスト読み上げ
+ipcMain.handle('tts-speak', async (_event, text: string) => {
+    if (!ttsEnabled) {
+        return { success: false, error: 'TTS not available' };
+    }
+
+    try {
+        const audioBuffer = await voicevoxProvider.synthesize(text);
+        await audioPlayer.play(audioBuffer);
+        return { success: true };
+    } catch (error) {
+        console.error('[TTS] Speak failed:', error);
+        return { success: false, error: String(error) };
+    }
+});
+
+// IPC: 読み上げ停止
+ipcMain.handle('tts-stop', () => {
+    if (audioPlayer) {
+        audioPlayer.stop();
+    }
+    return { success: true };
+});
+
+// IPC: TTS状態取得
+ipcMain.handle('tts-status', () => {
+    return {
+        enabled: ttsEnabled,
+        state: ttsEnabled ? audioPlayer.getState() : 'disabled',
+        speakerId: ttsEnabled ? voicevoxProvider.getSpeakerId() : null,
+    };
+});
+
+// IPC: 話者一覧取得
+ipcMain.handle('tts-speakers', async () => {
+    if (!ttsEnabled) {
+        return [];
+    }
+    return await voicevoxProvider.getSpeakers();
+});
+
+// IPC: 話者変更
+ipcMain.handle('tts-set-speaker', (_event, speakerId: number) => {
+    if (!ttsEnabled) {
+        return { success: false, error: 'TTS not available' };
+    }
+    voicevoxProvider.setSpeaker(speakerId);
+    return { success: true };
+});
+
+// IPC: 音声対話
+ipcMain.handle('dialogue-start', async () => {
+    if (!voiceEnabled) {
+        return { success: false, error: 'Voice system not enabled' };
+    }
+    voiceDialogue.start();
+    return { success: true };
+});
+
+ipcMain.handle('dialogue-stop', async () => {
+    if (!voiceEnabled) {
+        return { success: false, error: 'Voice system not enabled' };
+    }
+    voiceDialogue.stop();
+    return { success: true };
+});
+
+ipcMain.handle('dialogue-interrupt', async () => {
+    if (!voiceEnabled) {
+        return { success: false, error: 'Voice system not enabled' };
+    }
+    voiceDialogue.interrupt();
+    return { success: true };
+});
+
+ipcMain.handle('dialogue-status', async () => {
+    if (!voiceDialogue) {
+        return {
+            available: false,
+            active: false,
+            state: 'unavailable',
+        };
+    }
+    return {
+        available: true,
+        active: voiceDialogue.isDialogueActive(),
+        state: voiceDialogue.getState(),
+    };
+});
+
+ipcMain.handle('dialogue-set-auto-listen', async (_event, enabled: boolean) => {
+    if (!voiceEnabled) {
+        return { success: false, error: 'Voice system not enabled' };
+    }
+    voiceDialogue.setAutoListen(enabled);
+    return { success: true };
+});
+
+// IPC: Discord Bot state
+ipcMain.handle('discord-status', () => {
+    if (!discordBot) {
+        return { available: false, state: 'disabled' };
+    }
+    return {
+        available: true,
+        state: discordBot.getState(),
+    };
+});
+
+// IPC: Discord Bot start
+ipcMain.handle('discord-start', async () => {
+    if (!discordBot) {
+        return { success: false, error: 'Discord Bot not configured' };
+    }
+    try {
+        await discordBot.start();
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: String(error) };
+    }
+});
+
+// IPC: Discord Bot stop
+ipcMain.handle('discord-stop', async () => {
+    if (!discordBot) {
+        return { success: false, error: 'Discord Bot not configured' };
+    }
+    try {
+        await discordBot.stop();
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: String(error) };
+    }
+});
+
+// IPC: Message send to Discord
+ipcMain.handle('discord-send', async (_event, channelId: string, content: string) => {
+    if (!discordBot) {
+        return { success: false, error: 'Discord Bot not configured' };
+    }
+    try {
+        await discordBot.sendMessage(channelId, content);
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: String(error) };
+    }
+});
+
+// IPC: Discord音声チャンネルに参加
+ipcMain.handle('discord-voice-join', async (_event, channelId: string, guildId: string) => {
+    if (!discordBot) {
+        return { success: false, error: 'Discord Bot not configured' };
+    }
+    try {
+        await discordBot.joinVoiceChannel(channelId, guildId);
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: String(error) };
+    }
+});
+
+// IPC: Discord音声チャンネルから退出
+ipcMain.handle('discord-voice-leave', () => {
+    if (!discordBot) {
+        return { success: false, error: 'Discord Bot not configured' };
+    }
+    discordBot.leaveVoiceChannel();
+    return { success: true };
+});
+
+// IPC: Discord音声チャンネル情報取得
+ipcMain.handle('discord-voice-info', async () => {
+    if (!discordBot) {
+        return null;
+    }
+    return await discordBot.getVoiceChannelInfo();
+});
+
+// IPC: Discord音声接続状態
+ipcMain.handle('discord-voice-status', () => {
+    if (!discordBot) {
+        return { connected: false };
+    }
+    return { connected: discordBot.isVoiceConnected() };
+});
+
 app.whenReady().then(async () => {
     // 会話ストレージ初期化
     conversationStorage = new ConversationStorage();
@@ -293,6 +721,167 @@ app.whenReady().then(async () => {
             createWindow();
         }
     });
+
+    try {
+        whisperProvider = new WhisperProvider('base');
+        await whisperProvider.initialize();
+
+
+
+        microphoneCapture = new MicrophoneCapture();
+        microphoneCapture.initialize();
+
+        // 音声認識開始
+        microphoneCapture.on('audioCapture', async (audioBuffer: Buffer) => {
+            try {
+                console.log(`[Voice] Processing audio: ${audioBuffer.length} bytes`);
+                const result = await whisperProvider.transcribe(audioBuffer, 16000);
+                console.log(`[Voice] Transcription: ${result.text}`);
+
+                // Rendererに音声認識結果を送信
+                mainWindow?.webContents.send('voice-transcription', { text: result.text });
+            } catch (error) {
+                console.error(`[Voice] Transcription failed: ${error}`);
+                mainWindow?.webContents.send('voice-error', { error: String(error) });
+            }
+        });
+
+        microphoneCapture.on('stateChange', (state: CaptureState) => {
+            mainWindow?.webContents.send('voice-state', { state });
+        });
+
+        voiceEnabled = true;
+        console.log('[App] Voice system initialized');
+    } catch (error) {
+        console.error('[App] Voice system initialization failed:', error);
+        voiceEnabled = false;
+    }
+
+    try {
+        voicevoxProvider = new VoicevoxProvider('http://localhost:50021', 1);
+        await voicevoxProvider.initialize();
+
+        audioPlayer = new AudioPlayer();
+
+        audioPlayer.on('stateChange', (state) => {
+            mainWindow?.webContents.send('tts-state', { state });
+        });
+
+        ttsEnabled = true;
+        console.log('[APP] TTS system initialized');
+    } catch (error) {
+        console.log('[APP] TTS system not available:', error);
+        ttsEnabled = false;
+    }
+
+    // 音声対話コントローラの初期化（音声とTTSの両方が有効な場合のみ）
+    if (voiceEnabled && ttsEnabled) {
+        voiceDialogue = new VoiceDialogueController(
+            microphoneCapture,
+            whisperProvider,
+            voicevoxProvider,
+            audioPlayer,
+        );
+
+        // LLMハンドラー設定
+        voiceDialogue.setLLMHandler(async (userText: string) => {
+            return await processVoiceMessage(userText);
+        });
+
+        // Rendererに音声認識結果を送信
+        voiceDialogue.on('stateChange', (state: DialogueState) => {
+            mainWindow?.webContents.send('voice-dialogue-state', { state });
+        });
+
+        voiceDialogue.on('userSpeech', (text: string) => {
+            mainWindow?.webContents.send('dialogue-user-speech', { text });
+        });
+
+        voiceDialogue.on('assistantResponse', (text: string) => {
+            mainWindow?.webContents.send('dialogue-assistant-response', { text });
+        });
+
+        voiceDialogue.on('error', (error: string) => {
+            mainWindow?.webContents.send('dialogue-error', { error });
+        });
+
+        console.log('[APP] Voice dialogue controller initialized');
+    }
+
+    // Discord Botの初期化
+    const discordToken = process.env.DISCORD_BOT_TOKEN;
+    if (discordToken) {
+        try {
+            discordBot = new DiscordBot({
+                token: discordToken,
+                prefix: '!ai',
+            });
+
+            // text message handler setting
+            discordBot.setMessageHandler(processDiscordMessage);
+            // voice message handler setting
+            discordBot.setVoiceMessageHandler(processDiscordVoiceMessage);
+
+            // voice response event
+            discordBot.on('voiceResponse', async (data: { text: string; targetUserId: string; targetUsername: string }) => {
+                if (ttsEnabled && discordBot) {
+                    try {
+                        const audioBuffer = await voicevoxProvider.synthesize(data.text);
+                        await discordBot.playAudio(audioBuffer);
+                    } catch (error) {
+                        console.error('[Discord] TTS failed:', error);
+                    }
+                }
+            });
+
+            // transport event to Renderer
+            discordBot.on('ready', (tag: string) => {
+                mainWindow?.webContents.send('discord-ready', { tag });
+                // initialize voice function
+                discordBot?.initializeVoice();
+            });
+
+            discordBot.on('message', (ctx: DiscordMessageContext) => {
+                mainWindow?.webContents.send('discord-message', ctx);
+            });
+
+            discordBot.on('voiceReceived', (audio: IdentifiedAudio) => {
+                mainWindow?.webContents.send('discord-voice-received', {
+                    userId: audio.userId,
+                    username: audio.username,
+                    audioLength: audio.audioBuffer.length,
+                });
+            });
+
+            discordBot.on('voiceConnected', (info) => {
+                mainWindow?.webContents.send('discord-voice-connected', info);
+            });
+
+            discordBot.on('voiceDisconnected', (info) => {
+                mainWindow?.webContents.send('discord-voice-disconnected', info);
+            });
+
+            discordBot.on('error', (error: Error) => {
+                mainWindow?.webContents.send('discord-error', { error: error.message });
+            });
+
+            // execute Bot
+            await discordBot.start();
+            console.log('[App] Discord Bot initialized');
+        } catch (error) {
+            console.error('[App] Discord Bot initialization failed:', error);
+            discordBot = null;
+        }
+    } else {
+        console.log('[App] DISCORD_BOT_TOKEN not set, Discord Bot disabled');
+        discordBot = null;
+    }
+});
+
+app.on('before-quit', async () => {
+    if (discordBot) {
+        await discordBot.stop();
+    }
 });
 
 app.on('window-all-closed', () => {

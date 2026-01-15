@@ -155,11 +155,12 @@ body {
 
 /* 入力エリア */
 .input-area {
-    padding: 16px;
-    background-color: #16213e;
-    border-top: 1px solid #0f3460;
     display: flex;
-    gap: 12px;
+    gap: 10px;
+    padding: 15px;
+    background: #1a1a2e;
+    align-items: flex-end;
+    border-top: 1px solid #0f3460;
 }
 
 #message-input {
@@ -215,4 +216,60 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
     background: #e94560;
+}
+
+/* Voice Button Styles */
+.voice-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: #2a2a3e;
+    color: white;
+    font-size: 20px;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.voice-btn:hover {
+    background: #3a3a4e;
+}
+
+.voice-btn.listening {
+    background: #4a9eff;
+    animation: pulse 1.5s infinite;
+}
+
+.voice-btn.recording {
+    background: #e94560;
+    animation: pulse 0.5s infinite;
+}
+
+.voice-btn.thinking {
+    background: #f39c12;
+}
+
+.voice-btn.speaking {
+    background: #2ecc71;
+    animation: pulse 1s infinite;
+}
+
+.voice-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.1);
+    }
+
+    100% {
+        transform: scale(1);
+    }
 }

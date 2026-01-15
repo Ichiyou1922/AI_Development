@@ -25,7 +25,7 @@ async function renderConversationList(): Promise<void> {
         li.dataset.id = conv.id;
 
         const date = new Date(conv.updatedAt).toLocaleDateString('ja-JP');
-        
+
         li.innerHTML = `
             <span class="title">${escapeHtml(conv.title)}</span>
             <button class="delete-btn" data-id="${conv.id}">×</button>
@@ -53,6 +53,158 @@ async function renderConversationList(): Promise<void> {
             }
         });
     });
+}
+
+// ============================================================
+// 音声対話
+// ============================================================
+
+const voiceBtn = document.getElementById('voice-btn') as HTMLButtonElement;
+let isVoiceDialogueActive = false;
+
+// 音声ボタンのクリック
+voiceBtn.addEventListener('click', async () => {
+    const status = await window.electronAPI.dialogueStatus();
+
+    if (!status.available) {
+        alert('音声対話機能が利用できません。\nVOICEVOXとWhisperが正しく設定されているか確認してください。');
+        return;
+    }
+
+    if (status.active) {
+        // 停止
+        await window.electronAPI.dialogueStop();
+    } else {
+        // 開始
+        await window.electronAPI.dialogueStart();
+    }
+});
+
+// 音声対話状態の監視
+window.electronAPI.onDialogueState((data) => {
+    updateVoiceButtonState(data.state);
+});
+
+// ユーザー発話の表示
+window.electronAPI.onDialogueUserSpeech((data) => {
+    appendMessage('user', data.text);
+    scrollToBottom();
+
+    // アシスタントメッセージ用の要素を準備
+    currentAssistantMessageEl = appendMessage('assistant', '');
+});
+
+// アシスタント応答の表示（ストリーミング完了後）
+window.electronAPI.onDialogueAssistantResponse((data) => {
+    if (currentAssistantMessageEl) {
+        currentAssistantMessageEl.innerHTML = formatContent(data.text);
+    }
+    currentAssistantMessageEl = null;
+    renderConversationList();
+});
+
+// エラー表示
+window.electronAPI.onDialogueError((data) => {
+    console.error('Dialogue error:', data.error);
+    if (currentAssistantMessageEl) {
+        currentAssistantMessageEl.innerHTML = `<span style="color: #e94560;">エラー: ${escapeHtml(data.error)}</span>`;
+    }
+    currentAssistantMessageEl = null;
+});
+
+// ボタン状態の更新
+function updateVoiceButtonState(state: string): void {
+    voiceBtn.className = 'voice-btn';
+
+    switch (state) {
+        case 'listening':
+            voiceBtn.classList.add('listening');
+            voiceBtn.textContent = '👂';
+            voiceBtn.title = '聴いています... (クリックで停止)';
+            isVoiceDialogueActive = true;
+            break;
+        case 'recording':
+            voiceBtn.classList.add('recording');
+            voiceBtn.textContent = '🔴';
+            voiceBtn.title = '録音中...';
+            break;
+        case 'transcribing':
+            voiceBtn.classList.add('thinking');
+            voiceBtn.textContent = '📝';
+            voiceBtn.title = '認識中...';
+            break;
+        case 'thinking':
+            voiceBtn.classList.add('thinking');
+            voiceBtn.textContent = '🤔';
+            voiceBtn.title = '考え中...';
+            break;
+        case 'speaking':
+            voiceBtn.classList.add('speaking');
+            voiceBtn.textContent = '🔊';
+            voiceBtn.title = '話しています... (クリックで中断)';
+            break;
+        default:
+            voiceBtn.textContent = '🎤';
+            voiceBtn.title = '音声入力';
+            isVoiceDialogueActive = false;
+            break;
+    }
+}
+
+// 初期化時に音声対話の状態を確認（起動時の競合を避けるためポーリング）
+async function initializeVoiceDialogue(): Promise<void> {
+    const maxRetries = 10;
+    let retries = 0;
+
+    const checkStatus = async () => {
+        try {
+            const status = await window.electronAPI.dialogueStatus();
+            if (status.available) {
+                voiceBtn.disabled = false;
+                updateVoiceButtonState(status.state);
+                return true;
+            }
+        } catch (e) {
+            console.error('Status check failed:', e);
+        }
+        return false;
+    };
+
+    // 初回チェック
+    if (await checkStatus()) return;
+
+    // 初期状態は無効化
+    voiceBtn.disabled = true;
+    voiceBtn.title = '音声対話機能を準備中...';
+
+    // ポーリング開始
+    const interval = setInterval(async () => {
+        retries++;
+        const available = await checkStatus();
+
+        if (available) {
+            clearInterval(interval);
+        } else if (retries >= maxRetries) {
+            clearInterval(interval);
+            voiceBtn.disabled = true;
+            voiceBtn.title = '音声対話機能が利用できません\nVOICEVOXとWhisperが正しく設定されているか確認してください。';
+        }
+    }, 1000);
+}
+
+// 既存のinitialize関数を修正
+async function initialize(): Promise<void> {
+    setupStreamListeners();
+    await renderConversationList();
+
+    // アクティブな会話があればロード
+    const activeId = await window.electronAPI.conversationGetActive();
+    if (activeId) {
+        await loadConversation(activeId);
+    }
+
+    // 音声対話の初期化
+    await initializeVoiceDialogue();
 }
 
 // ============================================================
@@ -183,20 +335,5 @@ newConversationBtn.addEventListener('click', async () => {
     chatContainer.innerHTML = '';
     await renderConversationList();
 });
-
-// ============================================================
-// 初期化
-// ============================================================
-
-async function initialize(): Promise<void> {
-    setupStreamListeners();
-    await renderConversationList();
-
-    // アクティブな会話があればロード
-    const activeId = await window.electronAPI.conversationGetActive();
-    if (activeId) {
-        await loadConversation(activeId);
-    }
-}
 
 initialize();

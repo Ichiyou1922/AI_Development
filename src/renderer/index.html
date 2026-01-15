@@ -1,11 +1,15 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self';">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';">
     <title>AI Agent</title>
     <link rel="stylesheet" href="style.css">
+
 </head>
+
 <body>
     <div class="app-container">
         <!-- サイドバー：会話一覧 -->
@@ -25,11 +29,13 @@
                 <!-- メッセージ表示エリア -->
             </div>
             <div class="input-area">
-                <textarea id="message-input" placeholder="メッセージを入力..." rows="3"></textarea>
-                <button id="send-btn" class="btn-send">送信</button>
+                <button id="voice-btn" class="voice-btn" title="音声入力">🎤</button>
+                <textarea id="message-input" placeholder="メッセージを入力..."></textarea>
+                <button id="send-btn">送信</button>
             </div>
         </main>
     </div>
     <script src="renderer.js"></script>
 </body>
+
 </html>
