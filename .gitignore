@@ -16,3 +16,4 @@ out/
 *.tgz
 node_modules/**/test/.env
 node_modules
+assets/Hiyori/
