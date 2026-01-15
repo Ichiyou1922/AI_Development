@@ -165,7 +165,7 @@ function updateVoiceButtonState(state: string): void {
             }
             break;
     }
-    
+
     // speaking以外の状態に遷移したらリップシンク停止
     if (state !== 'speaking' && typeof stopLipSync === 'function') {
         stopLipSync();
@@ -422,14 +422,40 @@ function showAutonomousNotification(message: string): void {
     const notification = document.createElement('div');
     notification.className = 'autonomous-notification';
     notification.textContent = message;
-    
+
     document.body.appendChild(notification);
-    
+
     // アニメーション後に削除
     setTimeout(() => {
         notification.classList.add('fade-out');
         setTimeout(() => notification.remove(), 500);
     }, 5000);
+}
+
+// ============================================================
+// 画面認識の通知
+// ============================================================
+
+window.electronAPI.onScreenReaction((data) => {
+    console.log('[Screen]', data.type, data.message);
+    showScreenReactionNotification(data.message);
+});
+
+window.electronAPI.onScreenContextChange((context) => {
+    console.log('[Screen] Context:', context.app, context.category);
+});
+
+function showScreenReactionNotification(message: string): void {
+    const notification = document.createElement('div');
+    notification.className = 'screen-notification';
+    notification.textContent = message;
+
+    document.body.appendChild(notification);
+
+    setTimeout(() => {
+        notification.classList.add('fade-out');
+        setTimeout(() => notification.remove(), 500);
+    }, 4000);
 }
 
 initialize();

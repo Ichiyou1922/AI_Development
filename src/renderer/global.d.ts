@@ -102,6 +102,13 @@ declare global {
     onAutonomousDebug: (callback: (data: { type: string; idleTime?: number; threshold?: number }) => void) => void;
     autonomousStats: () => Promise<any>;
     autonomousSetEnabled: (enabled: boolean) => Promise<{ success: boolean }>;
+
+    // 画面認識
+    onScreenContextChange: (callback: (context: any) => void) => void;
+    onScreenReaction: (callback: (data: { type: string; message: string; context: any }) => void) => void;
+    screenStats: () => Promise<any>;
+    screenSetEnabled: (enabled: boolean) => Promise<{ success: boolean }>;
+    screenGetContext: () => Promise<any>;
   }
 
   interface Window {

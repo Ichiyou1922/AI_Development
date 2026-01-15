@@ -241,10 +241,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     hideMascot: () =>
         ipcRenderer.invoke('mascot-hide'),
-    
+
     showMascot: () =>
         ipcRenderer.invoke('mascot-show'),
-    
+
     toggleMascot: () =>
         ipcRenderer.invoke('mascot-toggle'),
 
@@ -264,4 +264,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     autonomousSetEnabled: (enabled: boolean) =>
         ipcRenderer.invoke('autonomous-set-enabled', enabled),
+
+    // ============================================================
+    // 画面認識
+    // ============================================================
+    onScreenContextChange: (callback: (context: any) => void) => {
+        ipcRenderer.on('screen-context-change', (_event, data) => callback(data));
+    },
+
+    onScreenReaction: (callback: (data: { type: string; message: string; context: any }) => void) => {
+        ipcRenderer.on('screen-reaction', (_event, data) => callback(data));
+    },
+
+    screenStats: () =>
+        ipcRenderer.invoke('screen-stats'),
+
+    screenSetEnabled: (enabled: boolean) =>
+        ipcRenderer.invoke('screen-set-enabled', enabled),
+
+    screenGetContext: () =>
+        ipcRenderer.invoke('screen-get-context'),
 });

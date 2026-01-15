@@ -28,6 +28,7 @@ import {
 } from './events/index.js';
 import { autonomousController } from './agent/index.js';
 import { getIdleDetectorConfig } from './config/index.js';
+import { screenshotCapture, ScreenContext, screenRecognitionController } from './screen/index.js';
 
 let userProfile: UserProfile;
 let memoryLifecycle: MemoryLifecycle;
@@ -777,6 +778,27 @@ ipcMain.handle('autonomous-set-enabled', (_event, enabled: boolean) => {
     return { success: true };
 });
 
+// IPC: 画面認識統計
+ipcMain.handle('screen-stats', () => {
+    return screenRecognitionController.getStats();
+});
+
+// IPC: 画面認識設定
+ipcMain.handle('screen-set-enabled', (_event, enabled: boolean) => {
+    screenRecognitionController.updateConfig({ enabled });
+    if (enabled) {
+        screenRecognitionController.start();
+    } else {
+        screenRecognitionController.stop();
+    }
+    return { success: true };
+});
+
+// IPC: 現在のコンテキスト取得
+ipcMain.handle('screen-get-context', () => {
+    return screenRecognitionController.getCurrentContext();
+});
+
 app.whenReady().then(async () => {
     // 会話ストレージ初期化
     conversationStorage = new ConversationStorage();
@@ -972,12 +994,12 @@ app.whenReady().then(async () => {
     // ============================================================
     // イベント駆動システムの初期化
     // ============================================================
-    
+
     // イベントハンドラの登録（全イベントをログ）
     eventBus.register('*', (event: AgentEvent) => {
         console.log(`[Event] ${event.type}:`, event.data);
     }, EventPriority.LOW);
-    
+
     // アイドル検出の開始
     const idleConfig = getIdleDetectorConfig();
     idleDetector.start(idleConfig);
@@ -992,20 +1014,20 @@ app.whenReady().then(async () => {
         mainWindow?.webContents.send('system-active', event.data);
         console.log('[App] User is active again, notifying renderer');
     }, EventPriority.NORMAL);
-    
+
     // 定期タイマーの例（1時間ごと）
     timerTrigger.register({
         name: 'hourly-check',
         intervalMs: 60 * 60 * 1000,
         priority: EventPriority.LOW,
     });
-    
+
     console.log('[App] Event system initialized');
 
     // ============================================================
     // 自律行動コントローラの初期化
     // ============================================================
-    
+
     // LLMハンドラを設定
     autonomousController.setLLMHandler(async (prompt: string) => {
         return new Promise((resolve, reject) => {
@@ -1020,7 +1042,7 @@ app.whenReady().then(async () => {
             );
         });
     });
-    
+
     // 自律行動イベントをRendererに転送
     autonomousController.on('action', (data) => {
         mainWindow?.webContents.send('autonomous-action', data);
@@ -1037,15 +1059,59 @@ app.whenReady().then(async () => {
     autonomousController.on('debug', (data) => {
         mainWindow?.webContents.send('autonomous-debug', data);
     });
-    
+
     // 自律チェック用タイマー（10分ごと）
     timerTrigger.register({
         name: 'autonomous-check',
         intervalMs: 10 * 60 * 1000,
         priority: EventPriority.LOW,
     });
-    
+
     console.log('[App] Autonomous controller initialized');
+
+    // ============================================================
+    // 画面認識システムの初期化
+    // ============================================================
+
+    // LLMテキストハンドラを設定
+    screenRecognitionController.setLLMTextHandler(async (prompt: string) => {
+        return new Promise((resolve, reject) => {
+            let response = '';
+            llmRouter.sendMessageStream(
+                [{ role: 'user', content: prompt }],
+                {
+                    onToken: (token) => { response += token; },
+                    onDone: () => resolve(response),
+                    onError: (error) => reject(new Error(error)),
+                }
+            );
+        });
+    });
+
+    // 画面認識イベントをRendererに転送
+    screenRecognitionController.on('contextChange', (context: ScreenContext) => {
+        mainWindow?.webContents.send('screen-context-change', context);
+    });
+
+    screenRecognitionController.on('reaction', (data) => {
+        mainWindow?.webContents.send('screen-reaction', data);
+
+        // TTSが有効なら読み上げ
+        if (ttsEnabled && data.message) {
+            voicevoxProvider.synthesize(data.message)
+                .then(audio => audioPlayer.play(audio))
+                .catch(err => console.error('[ScreenRecognition] TTS failed:', err));
+        }
+    });
+
+    // 画面認識を開始（ウィンドウ監視のみ，スクリーンショットは無効）
+    screenRecognitionController.start({
+        windowMonitorEnabled: true,
+        screenshotEnabled: false,
+        reactToWindowChange: true,
+    });
+
+    console.log('[App] Screen recognition initialized');
 });
 
 app.on('before-quit', async () => {
