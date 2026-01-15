@@ -3,14 +3,17 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; 
-                   script-src 'self' 'unsafe-eval'; 
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; 
+                   script-src 'self' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; 
                    style-src 'self' 'unsafe-inline';">
     <title>AI Agent</title>
     <link rel="stylesheet" href="style.css">
-    <!-- Live2D Cubism Core -->
+    <!-- PixiJS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.4.2/pixi.min.js"></script>
     <!-- Live2D Cubism Core -->
     <script src="lib/live2dcubismcore.min.js"></script>
+    <!-- pixi-live2d-display -->
+    <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display/dist/cubism4.min.js"></script>
 </head>
 
 <body>
@@ -43,6 +46,9 @@
             </div>
         </main>
     </div>
+    <!-- Live2D初期化（CDN版） -->
+    <script src="live2d.js"></script>
+    <!-- メインRenderer -->
     <script src="renderer.js"></script>
 </body>
 

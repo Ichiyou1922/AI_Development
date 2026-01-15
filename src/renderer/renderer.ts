@@ -1,11 +1,14 @@
-import { Live2DManager } from './live2d/Live2DManager';
-
-// Live2D関連
-let live2dManager: Live2DManager | null = null;
-const avatarCanvas = document.getElementById('avatar-canvas') as HTMLCanvasElement;
-const avatarContainer = document.getElementById('avatar-container') as HTMLDivElement;
+// Live2D関数はグローバルに公開されている（live2d.tsから）
+declare function initLive2D(): Promise<void>;
+declare function setMouthOpen(value: number): void;
+declare function blinkLive2D(): void;
+declare function setEmotion(emotion: 'neutral' | 'happy' | 'sad' | 'angry' | 'surprised' | 'thinking'): void;
+declare function setEmotionFromText(text: string): void;
+declare function startLipSync(): void;
+declare function stopLipSync(): void;
 
 // DOM要素
+const avatarContainer = document.getElementById('avatar-container') as HTMLDivElement;
 const chatContainer = document.getElementById('chat-container') as HTMLDivElement;
 const messageInput = document.getElementById('message-input') as HTMLTextAreaElement;
 const sendBtn = document.getElementById('send-btn') as HTMLButtonElement;
@@ -39,7 +42,6 @@ async function renderConversationList(): Promise<void> {
             <div class="meta">${date} · ${conv.messageCount}件</div>
         `;
 
-        // 会話選択
         li.addEventListener('click', async (e) => {
             if ((e.target as HTMLElement).classList.contains('delete-btn')) return;
             await loadConversation(conv.id);
@@ -48,7 +50,6 @@ async function renderConversationList(): Promise<void> {
         conversationListEl.appendChild(li);
     }
 
-    // 削除ボタンのイベント
     document.querySelectorAll('.delete-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
@@ -69,7 +70,6 @@ async function renderConversationList(): Promise<void> {
 const voiceBtn = document.getElementById('voice-btn') as HTMLButtonElement;
 let isVoiceDialogueActive = false;
 
-// 音声ボタンのクリック
 voiceBtn.addEventListener('click', async () => {
     const status = await window.electronAPI.dialogueStatus();
 
@@ -79,29 +79,22 @@ voiceBtn.addEventListener('click', async () => {
     }
 
     if (status.active) {
-        // 停止
         await window.electronAPI.dialogueStop();
     } else {
-        // 開始
         await window.electronAPI.dialogueStart();
     }
 });
 
-// 音声対話状態の監視
 window.electronAPI.onDialogueState((data) => {
     updateVoiceButtonState(data.state);
 });
 
-// ユーザー発話の表示
 window.electronAPI.onDialogueUserSpeech((data) => {
     appendMessage('user', data.text);
     scrollToBottom();
-
-    // アシスタントメッセージ用の要素を準備
     currentAssistantMessageEl = appendMessage('assistant', '');
 });
 
-// アシスタント応答の表示（ストリーミング完了後）
 window.electronAPI.onDialogueAssistantResponse((data) => {
     if (currentAssistantMessageEl) {
         currentAssistantMessageEl.innerHTML = formatContent(data.text);
@@ -110,17 +103,16 @@ window.electronAPI.onDialogueAssistantResponse((data) => {
     renderConversationList();
 
     // 応答テキストから感情を検出してアバターに反映
-    if (live2dManager) {
-        live2dManager.setEmotionFromText(data.text);
-
-        // 数秒後にneutralに戻す
+    if (typeof setEmotionFromText === 'function') {
+        setEmotionFromText(data.text);
         setTimeout(() => {
-            live2dManager?.setEmotion('neutral');
+            if (typeof setEmotion === 'function') {
+                setEmotion('neutral');
+            }
         }, 5000);
     }
 });
 
-// エラー表示
 window.electronAPI.onDialogueError((data) => {
     console.error('Dialogue error:', data.error);
     if (currentAssistantMessageEl) {
@@ -129,7 +121,6 @@ window.electronAPI.onDialogueError((data) => {
     currentAssistantMessageEl = null;
 });
 
-// ボタン状態の更新
 function updateVoiceButtonState(state: string): void {
     voiceBtn.className = 'voice-btn';
 
@@ -159,16 +150,27 @@ function updateVoiceButtonState(state: string): void {
             voiceBtn.classList.add('speaking');
             voiceBtn.textContent = '🔊';
             voiceBtn.title = '話しています... (クリックで中断)';
+            // リップシンク開始
+            if (typeof startLipSync === 'function') {
+                startLipSync();
+            }
             break;
         default:
             voiceBtn.textContent = '🎤';
             voiceBtn.title = '音声入力';
             isVoiceDialogueActive = false;
+            // リップシンク停止
+            if (typeof stopLipSync === 'function') {
+                stopLipSync();
+            }
             break;
     }
+    
+    // speaking以外の状態に遷移したらリップシンク停止
+    if (state !== 'speaking' && typeof stopLipSync === 'function') {
+        stopLipSync();
+    }
 }
-
-// 初期化時に音声対話の状態を確認（起動時の競合を避けるためポーリング）
 async function initializeVoiceDialogue(): Promise<void> {
     const maxRetries = 10;
     let retries = 0;
@@ -187,14 +189,11 @@ async function initializeVoiceDialogue(): Promise<void> {
         return false;
     };
 
-    // 初回チェック
     if (await checkStatus()) return;
 
-    // 初期状態は無効化
     voiceBtn.disabled = true;
     voiceBtn.title = '音声対話機能を準備中...';
 
-    // ポーリング開始
     const interval = setInterval(async () => {
         retries++;
         const available = await checkStatus();
@@ -204,54 +203,34 @@ async function initializeVoiceDialogue(): Promise<void> {
         } else if (retries >= maxRetries) {
             clearInterval(interval);
             voiceBtn.disabled = true;
-            voiceBtn.title = '音声対話機能が利用できません\nVOICEVOXとWhisperが正しく設定されているか確認してください。';
+            voiceBtn.title = '音声対話機能が利用できません';
         }
     }, 1000);
 }
 
-// 既存のinitialize関数を修正
+// ============================================================
+// 初期化
+// ============================================================
+
 async function initialize(): Promise<void> {
     setupStreamListeners();
     await renderConversationList();
 
-    // アクティブな会話があればロード
     const activeId = await window.electronAPI.conversationGetActive();
     if (activeId) {
         await loadConversation(activeId);
     }
 
-    // 音声対話の初期化
     await initializeVoiceDialogue();
-
-    // Live2Dの初期化
     await initializeLive2D();
 }
 
-// Live2D初期化関数
 async function initializeLive2D(): Promise<void> {
     try {
-        live2dManager = new Live2DManager(avatarCanvas);
-        await live2dManager.initialize();
-
-        // モデルをロード（パスは環境に合わせて調整）
-        await live2dManager.loadModel('assets/Hiyori/hiyori_pro_t11.model3.json');
-
-        // リサイズ対応
-        window.addEventListener('resize', () => {
-            live2dManager?.resize();
-        });
-
-        // 定期的なまばたき
-        setInterval(() => {
-            if (live2dManager && Math.random() < 0.3) {
-                live2dManager.blink();
-            }
-        }, 3000);
-
+        await initLive2D();
         console.log('[Renderer] Live2D initialized');
     } catch (error) {
         console.error('[Renderer] Live2D initialization failed:', error);
-        // アバターエリアを非表示
         avatarContainer.classList.add('hidden');
     }
 }
@@ -287,7 +266,6 @@ function appendMessage(role: string, content: string): HTMLDivElement {
 }
 
 function formatContent(content: string): string {
-    // 簡易的なコードブロック処理
     return escapeHtml(content)
         .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
         .replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -316,14 +294,11 @@ async function sendMessage(): Promise<void> {
     sendBtn.disabled = true;
     messageInput.value = '';
 
-    // ユーザーメッセージを表示
     appendMessage('user', message);
     scrollToBottom();
 
-    // アシスタントメッセージ用の要素を準備
     currentAssistantMessageEl = appendMessage('assistant', '');
 
-    // ストリーミング開始
     await window.electronAPI.sendMessageStream(message);
 }
 
@@ -332,7 +307,6 @@ async function sendMessage(): Promise<void> {
 // ============================================================
 
 function setupStreamListeners(): void {
-    // 既存リスナーを削除
     window.electronAPI.removeLLMListeners('llm-token');
     window.electronAPI.removeLLMListeners('llm-done');
     window.electronAPI.removeLLMListeners('llm-error');
@@ -352,15 +326,15 @@ function setupStreamListeners(): void {
         isStreaming = false;
         sendBtn.disabled = false;
         currentAssistantMessageEl = null;
-        renderConversationList();  // タイトル更新のため
+        renderConversationList();
 
         // 応答テキストから感情を検出してアバターに反映
-        if (live2dManager) {
-            live2dManager.setEmotionFromText(fullText);
-
-            // 数秒後にneutralに戻す
+        if (typeof setEmotionFromText === 'function') {
+            setEmotionFromText(fullText);
             setTimeout(() => {
-                live2dManager?.setEmotion('neutral');
+                if (typeof setEmotion === 'function') {
+                    setEmotion('neutral');
+                }
             }, 5000);
         }
     });
@@ -394,38 +368,5 @@ newConversationBtn.addEventListener('click', async () => {
     chatContainer.innerHTML = '';
     await renderConversationList();
 });
-
-/**
- * デバッグ用でぐろーばるに公開する
- */
-(window as any).testEmotion = (emotion: string) => {
-    if (live2dManager) {
-        live2dManager.setEmotion(emotion as any);
-    }
-};
-
-(window as any).testLipSync = (value: number) => {
-    if (live2dManager) {
-        live2dManager.setMouthOpen(value);
-    }
-};
-
-(window as any).testLipSyncAuto = () => {
-    let phase = 0;
-    const interval = setInterval(() => {
-        if (live2dManager) {
-            // サイン波で口を開閉
-            const value = (Math.sin(phase) + 1) / 2;
-            live2dManager.setMouthOpen(value);
-            phase += 0.3;
-        }
-    }, 50);
-
-    // 5秒で停止
-    setTimeout(() => {
-        clearInterval(interval);
-        live2dManager?.setMouthOpen(0);
-    }, 5000);
-};
 
 initialize();

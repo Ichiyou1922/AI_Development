@@ -4,9 +4,9 @@
   "description": "",
   "main": "dist/main/index.js",
   "scripts": {
-    "build:main": "tsc -p src/main/tsconfig.json",
-    "build:preload": "tsc -p src/preload/tsconfig.json",
-    "build:renderer": "esbuild src/renderer/renderer.ts --bundle --outfile=dist/renderer/renderer.js --platform=browser --format=iife --external:electron",
+    "build:main": "esbuild src/main/index.ts --bundle --platform=node --outfile=dist/main/index.js --external:electron --external:better-sqlite3 --external:@anthropic-ai/sdk --external:discord.js --external:@discordjs/voice --external:@discordjs/opus --external:sodium-native --external:prism-media --external:mic --external:speaker --external:wav --external:whisper-node --external:@xenova/transformers",
+    "build:preload": "esbuild src/preload/index.ts --bundle --platform=node --outfile=dist/preload/index.js --external:electron",
+    "build:renderer": "esbuild src/renderer/renderer.ts --bundle --outfile=dist/renderer/renderer.js --platform=browser --format=iife --external:electron && esbuild src/renderer/live2d.ts --bundle --outfile=dist/renderer/live2d.js --platform=browser --format=iife",
     "copy-assets": "mkdir -p dist/renderer && cp src/renderer/*.html src/renderer/*.css dist/renderer/ && cp -r src/renderer/lib dist/renderer/ && cp -r src/renderer/assets dist/renderer/",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer && npm run copy-assets",
     "start": "unset ELECTRON_RUN_AS_NODE && npm run build && electron .",
