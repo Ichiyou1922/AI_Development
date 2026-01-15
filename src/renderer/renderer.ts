@@ -1,3 +1,10 @@
+import { Live2DManager } from './live2d/Live2DManager';
+
+// Live2D関連
+let live2dManager: Live2DManager | null = null;
+const avatarCanvas = document.getElementById('avatar-canvas') as HTMLCanvasElement;
+const avatarContainer = document.getElementById('avatar-container') as HTMLDivElement;
+
 // DOM要素
 const chatContainer = document.getElementById('chat-container') as HTMLDivElement;
 const messageInput = document.getElementById('message-input') as HTMLTextAreaElement;
@@ -101,6 +108,16 @@ window.electronAPI.onDialogueAssistantResponse((data) => {
     }
     currentAssistantMessageEl = null;
     renderConversationList();
+
+    // 応答テキストから感情を検出してアバターに反映
+    if (live2dManager) {
+        live2dManager.setEmotionFromText(data.text);
+
+        // 数秒後にneutralに戻す
+        setTimeout(() => {
+            live2dManager?.setEmotion('neutral');
+        }, 5000);
+    }
 });
 
 // エラー表示
@@ -205,6 +222,38 @@ async function initialize(): Promise<void> {
 
     // 音声対話の初期化
     await initializeVoiceDialogue();
+
+    // Live2Dの初期化
+    await initializeLive2D();
+}
+
+// Live2D初期化関数
+async function initializeLive2D(): Promise<void> {
+    try {
+        live2dManager = new Live2DManager(avatarCanvas);
+        await live2dManager.initialize();
+
+        // モデルをロード（パスは環境に合わせて調整）
+        await live2dManager.loadModel('assets/Hiyori/hiyori_pro_t11.model3.json');
+
+        // リサイズ対応
+        window.addEventListener('resize', () => {
+            live2dManager?.resize();
+        });
+
+        // 定期的なまばたき
+        setInterval(() => {
+            if (live2dManager && Math.random() < 0.3) {
+                live2dManager.blink();
+            }
+        }, 3000);
+
+        console.log('[Renderer] Live2D initialized');
+    } catch (error) {
+        console.error('[Renderer] Live2D initialization failed:', error);
+        // アバターエリアを非表示
+        avatarContainer.classList.add('hidden');
+    }
 }
 
 // ============================================================
@@ -304,6 +353,16 @@ function setupStreamListeners(): void {
         sendBtn.disabled = false;
         currentAssistantMessageEl = null;
         renderConversationList();  // タイトル更新のため
+
+        // 応答テキストから感情を検出してアバターに反映
+        if (live2dManager) {
+            live2dManager.setEmotionFromText(fullText);
+
+            // 数秒後にneutralに戻す
+            setTimeout(() => {
+                live2dManager?.setEmotion('neutral');
+            }, 5000);
+        }
     });
 
     window.electronAPI.onLLMError((error) => {
@@ -335,5 +394,38 @@ newConversationBtn.addEventListener('click', async () => {
     chatContainer.innerHTML = '';
     await renderConversationList();
 });
+
+/**
+ * デバッグ用でぐろーばるに公開する
+ */
+(window as any).testEmotion = (emotion: string) => {
+    if (live2dManager) {
+        live2dManager.setEmotion(emotion as any);
+    }
+};
+
+(window as any).testLipSync = (value: number) => {
+    if (live2dManager) {
+        live2dManager.setMouthOpen(value);
+    }
+};
+
+(window as any).testLipSyncAuto = () => {
+    let phase = 0;
+    const interval = setInterval(() => {
+        if (live2dManager) {
+            // サイン波で口を開閉
+            const value = (Math.sin(phase) + 1) / 2;
+            live2dManager.setMouthOpen(value);
+            phase += 0.3;
+        }
+    }, 50);
+
+    // 5秒で停止
+    setTimeout(() => {
+        clearInterval(interval);
+        live2dManager?.setMouthOpen(0);
+    }, 5000);
+};
 
 initialize();

@@ -273,3 +273,38 @@ body {
         transform: scale(1);
     }
 }
+
+/* Live2Dアバター */
+.avatar-container {
+    height: 300px;
+    background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+    border-bottom: 1px solid #0f3460;
+    position: relative;
+    overflow: hidden;
+}
+
+#avatar-canvas {
+    width: 100%;
+    height: 100%;
+}
+
+/* アバター非表示時 */
+.avatar-container.hidden {
+    display: none;
+}
+
+/* チャットコンテナの高さ調整 */
+.main-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.chat-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    min-height: 0;
+    /* flexboxでのスクロール対応 */
+}

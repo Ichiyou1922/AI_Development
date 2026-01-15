@@ -81,6 +81,11 @@ declare global {
     onDiscordVoiceReceived: (callback: (data: any) => void) => void;
     onDiscordVoiceConnected: (callback: (data: any) => void) => void;
     onDiscordVoiceDisconnected: (callback: () => void) => void;
+
+    // Live2D
+    initLive2D: () => Promise<void>;
+    blinkLive2D: () => void;
+    setMouthOpen: (value: number) => void;
   }
 
   interface Window {
@@ -111,3 +116,5 @@ declare global {
 }
 
 export { };
+
+
