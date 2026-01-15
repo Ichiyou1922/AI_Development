@@ -86,6 +86,22 @@ declare global {
     initLive2D: () => Promise<void>;
     blinkLive2D: () => void;
     setMouthOpen: (value: number) => void;
+
+    // イベントシステム
+    onSystemIdle: (callback: (data: { idleTime: number }) => void) => void;
+    onSystemActive: (callback: (data: { idleTime: number }) => void) => void;
+
+    // マスコット
+    openMainWindow: () => Promise<void>;
+    hideMascot: () => Promise<void>;
+    showMascot: () => Promise<void>;
+    toggleMascot: () => Promise<void>;
+
+    // 自律行動
+    onAutonomousAction: (callback: (data: { type: string; message: string }) => void) => void;
+    onAutonomousDebug: (callback: (data: { type: string; idleTime?: number; threshold?: number }) => void) => void;
+    autonomousStats: () => Promise<any>;
+    autonomousSetEnabled: (enabled: boolean) => Promise<{ success: boolean }>;
   }
 
   interface Window {

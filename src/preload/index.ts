@@ -221,4 +221,47 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onDiscordVoiceDisconnected: (callback: () => void) => {
         ipcRenderer.on('discord-voice-disconnected', () => callback());
     },
+
+    // ============================================================
+    // イベントシステム
+    // ============================================================
+    onSystemIdle: (callback: (data: { idleTime: number }) => void) => {
+        ipcRenderer.on('system-idle', (_event, data) => callback(data));
+    },
+
+    onSystemActive: (callback: (data: { idleTime: number }) => void) => {
+        ipcRenderer.on('system-active', (_event, data) => callback(data));
+    },
+
+    // ============================================================
+    // マスコット
+    // ============================================================
+    openMainWindow: () =>
+        ipcRenderer.invoke('mascot-open-main'),
+
+    hideMascot: () =>
+        ipcRenderer.invoke('mascot-hide'),
+    
+    showMascot: () =>
+        ipcRenderer.invoke('mascot-show'),
+    
+    toggleMascot: () =>
+        ipcRenderer.invoke('mascot-toggle'),
+
+    // ============================================================
+    // 自律行動
+    // ============================================================
+    onAutonomousAction: (callback: (data: { type: string; message: string }) => void) => {
+        ipcRenderer.on('autonomous-action', (_event, data) => callback(data));
+    },
+
+    onAutonomousDebug: (callback: (data: { type: string; idleTime?: number; threshold?: number }) => void) => {
+        ipcRenderer.on('autonomous-debug', (_event, data) => callback(data));
+    },
+
+    autonomousStats: () =>
+        ipcRenderer.invoke('autonomous-stats'),
+
+    autonomousSetEnabled: (enabled: boolean) =>
+        ipcRenderer.invoke('autonomous-set-enabled', enabled),
 });

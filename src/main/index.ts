@@ -18,6 +18,16 @@ import { VoicevoxProvider } from './voice/voicevoxProvider.js';
 import { AudioPlayer } from './voice/audioPlayer.js';
 import { VoiceDialogueController, DialogueState } from './voice/voiceDialogueController.js';
 import { DiscordBot, DiscordMessageContext, IdentifiedAudio } from './discord/index.js';
+import { MascotWindow } from './windows/MascotWindow.js';
+import {
+    eventBus,
+    timerTrigger,
+    idleDetector,
+    EventPriority,
+    AgentEvent,
+} from './events/index.js';
+import { autonomousController } from './agent/index.js';
+import { getIdleDetectorConfig } from './config/index.js';
 
 let userProfile: UserProfile;
 let memoryLifecycle: MemoryLifecycle;
@@ -29,6 +39,10 @@ let audioPlayer: AudioPlayer;
 let ttsEnabled: boolean = false;
 let voiceDialogue: VoiceDialogueController;
 let discordBot: DiscordBot | null = null;
+
+// app.isQuittingはelectronTypes.d.tsで定義
+
+let mascotWindow: MascotWindow | null = null;
 
 // read .env
 dotenv.config();
@@ -60,6 +74,18 @@ async function createWindow(): Promise<void> {
 
     mainWindow.on('closed', () => {
         mainWindow = null;
+    });
+}
+
+function createMascotWindow(): void {
+    mascotWindow = new MascotWindow();
+    mascotWindow.create();
+
+    mascotWindow.setOpenMainWindowCallback(() => {
+        if (mainWindow) {
+            mainWindow.show();
+            mainWindow.focus();
+        }
     });
 }
 
@@ -684,6 +710,73 @@ ipcMain.handle('discord-voice-status', () => {
     return { connected: discordBot.isVoiceConnected() };
 });
 
+// IPC: マスコット関連
+ipcMain.handle('mascot-open-main', () => {
+    if (mainWindow) {
+        mainWindow.show();
+        mainWindow.focus();
+    }
+    // マスコットウィンドウを非表示にする
+    if (mascotWindow) {
+        mascotWindow.hide();
+    }
+});
+
+ipcMain.handle('mascot-hide', () => {
+    if (mascotWindow) {
+        mascotWindow.hide();
+    }
+});
+
+ipcMain.handle('mascot-toggle', () => {
+    if (mascotWindow) {
+        mascotWindow.toggle();
+    }
+});
+
+ipcMain.handle('mascot-show', () => {
+    if (!mascotWindow) {
+        createMascotWindow();
+    } else {
+        mascotWindow.show();
+    }
+    // メインウィンドウを非表示にする
+    if (mainWindow) {
+        mainWindow.hide();
+    }
+});
+
+// IPC: イベントシステム統計
+ipcMain.handle('events-stats', () => {
+    return {
+        bus: eventBus.getStats(),
+        idle: idleDetector.getState(),
+        timers: timerTrigger.list(),
+    };
+});
+
+// IPC: イベント発行（デバッグ用）
+ipcMain.handle('events-publish', (_event, type: string, data: any) => {
+    eventBus.publish({
+        type: type as any,
+        priority: EventPriority.NORMAL,
+        timestamp: Date.now(),
+        data,
+    });
+    return { success: true };
+});
+
+// IPC: 自律行動統計
+ipcMain.handle('autonomous-stats', () => {
+    return autonomousController.getStats();
+});
+
+// IPC: 自律行動有効/無効
+ipcMain.handle('autonomous-set-enabled', (_event, enabled: boolean) => {
+    autonomousController.setEnabled(enabled);
+    return { success: true };
+});
+
 app.whenReady().then(async () => {
     // 会話ストレージ初期化
     conversationStorage = new ConversationStorage();
@@ -706,7 +799,6 @@ app.whenReady().then(async () => {
     console.log('[App] Memory system initialized');
 
     await createWindow();
-
     // 定期メンテ（1時間ごと）
     setInterval(async () => {
         try {
@@ -876,6 +968,84 @@ app.whenReady().then(async () => {
         console.log('[App] DISCORD_BOT_TOKEN not set, Discord Bot disabled');
         discordBot = null;
     }
+
+    // ============================================================
+    // イベント駆動システムの初期化
+    // ============================================================
+    
+    // イベントハンドラの登録（全イベントをログ）
+    eventBus.register('*', (event: AgentEvent) => {
+        console.log(`[Event] ${event.type}:`, event.data);
+    }, EventPriority.LOW);
+    
+    // アイドル検出の開始
+    const idleConfig = getIdleDetectorConfig();
+    idleDetector.start(idleConfig);
+
+    // アイドルイベントをRendererに転送
+    eventBus.register('system:idle', (event: AgentEvent) => {
+        mainWindow?.webContents.send('system-idle', event.data);
+        console.log('[App] User is idle, notifying renderer');
+    }, EventPriority.NORMAL);
+
+    eventBus.register('system:active', (event: AgentEvent) => {
+        mainWindow?.webContents.send('system-active', event.data);
+        console.log('[App] User is active again, notifying renderer');
+    }, EventPriority.NORMAL);
+    
+    // 定期タイマーの例（1時間ごと）
+    timerTrigger.register({
+        name: 'hourly-check',
+        intervalMs: 60 * 60 * 1000,
+        priority: EventPriority.LOW,
+    });
+    
+    console.log('[App] Event system initialized');
+
+    // ============================================================
+    // 自律行動コントローラの初期化
+    // ============================================================
+    
+    // LLMハンドラを設定
+    autonomousController.setLLMHandler(async (prompt: string) => {
+        return new Promise((resolve, reject) => {
+            let response = '';
+            llmRouter.sendMessageStream(
+                [{ role: 'user', content: prompt }],
+                {
+                    onToken: (token) => { response += token; },
+                    onDone: () => resolve(response),
+                    onError: (error) => reject(new Error(error)),
+                }
+            );
+        });
+    });
+    
+    // 自律行動イベントをRendererに転送
+    autonomousController.on('action', (data) => {
+        mainWindow?.webContents.send('autonomous-action', data);
+
+        // TTSが有効なら読み上げ
+        if (ttsEnabled && data.message) {
+            voicevoxProvider.synthesize(data.message)
+                .then(audio => audioPlayer.play(audio))
+                .catch(err => console.error('[Autonomous] TTS failed:', err));
+        }
+    });
+
+    // デバッグイベントをRendererに転送
+    autonomousController.on('debug', (data) => {
+        mainWindow?.webContents.send('autonomous-debug', data);
+    });
+    
+    // 自律チェック用タイマー（10分ごと）
+    timerTrigger.register({
+        name: 'autonomous-check',
+        intervalMs: 10 * 60 * 1000,
+        priority: EventPriority.LOW,
+    });
+    
+    console.log('[App] Autonomous controller initialized');
 });
 
 app.on('before-quit', async () => {

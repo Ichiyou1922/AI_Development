@@ -209,11 +209,26 @@ async function initializeVoiceDialogue(): Promise<void> {
 }
 
 // ============================================================
+// アイドル検知イベント
+// ============================================================
+
+function setupIdleListeners(): void {
+    window.electronAPI.onSystemIdle((data) => {
+        console.log(`[Idle] ユーザーがアイドル状態になりました (${data.idleTime}秒)`);
+    });
+
+    window.electronAPI.onSystemActive((data) => {
+        console.log(`[Idle] ユーザーがアクティブになりました (前回のアイドル時間: ${data.idleTime}秒)`);
+    });
+}
+
+// ============================================================
 // 初期化
 // ============================================================
 
 async function initialize(): Promise<void> {
     setupStreamListeners();
+    setupIdleListeners();
     await renderConversationList();
 
     const activeId = await window.electronAPI.conversationGetActive();
@@ -368,5 +383,53 @@ newConversationBtn.addEventListener('click', async () => {
     chatContainer.innerHTML = '';
     await renderConversationList();
 });
+
+// マスコットモード切り替え
+const mascotBtn = document.getElementById('mascot-btn') as HTMLButtonElement;
+if (mascotBtn) {
+    mascotBtn.addEventListener('click', async () => {
+        // マスコットを表示してメインウィンドウを最小化
+        if (window.electronAPI.showMascot) {
+            await window.electronAPI.showMascot();
+        }
+    });
+}
+
+// ============================================================
+// 自律行動の通知
+// ============================================================
+
+window.electronAPI.onAutonomousAction((data) => {
+    console.log('[Autonomous]', data.type, data.message);
+
+    // 簡易的な通知表示
+    showAutonomousNotification(data.message);
+});
+
+// デバッグ用: autonomousControllerからのアイドル検知ログ
+window.electronAPI.onAutonomousDebug((data) => {
+    if (data.type === 'idle_detected') {
+        console.log(`[Autonomous Debug] アイドル検知: idleTime=${data.idleTime}秒, threshold=${data.threshold}秒`);
+    } else if (data.type === 'active_detected') {
+        console.log(`[Autonomous Debug] アクティブ復帰: idleTime=${data.idleTime}秒`);
+    } else {
+        console.log('[Autonomous Debug]', data);
+    }
+});
+
+function showAutonomousNotification(message: string): void {
+    // 通知要素を作成
+    const notification = document.createElement('div');
+    notification.className = 'autonomous-notification';
+    notification.textContent = message;
+    
+    document.body.appendChild(notification);
+    
+    // アニメーション後に削除
+    setTimeout(() => {
+        notification.classList.add('fade-out');
+        setTimeout(() => notification.remove(), 500);
+    }, 5000);
+}
 
 initialize();

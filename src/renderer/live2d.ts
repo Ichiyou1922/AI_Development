@@ -60,16 +60,16 @@ async function initLive2D(): Promise<void> {
         // モデルをロード
         live2dModel = await Live2DModel.from('assets/Hiyori/hiyori_pro_t11.model3.json');
 
-        // サイズ調整
+        // サイズ調整（上半身アップ表示）
         const scale = Math.min(
-            container.clientWidth / live2dModel.width * 0.8,
-            container.clientHeight / live2dModel.height * 0.9
+            container.clientWidth / live2dModel.width * 2.0,
+            container.clientHeight / live2dModel.height * 2.0
         );
         live2dModel.scale.set(scale);
-        live2dModel.anchor.set(0.5, 0.5);
+        live2dModel.anchor.set(0.5, 0.3);
         live2dModel.position.set(
             container.clientWidth / 2,
-            container.clientHeight / 2
+            container.clientHeight * 0.7
         );
 
         live2dApp.stage.addChild(live2dModel);
