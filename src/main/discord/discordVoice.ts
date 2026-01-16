@@ -16,6 +16,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { IdentifiedAudio, VoiceChannelInfo, VoiceChannelMember } from './types.js';
+import * as prism from 'prism-media';
 
 /**
  * Discord音声チャンネル管理クラス
@@ -178,16 +179,26 @@ export class DiscordVoice extends EventEmitter {
         this.userSpeakingStart.set(userId, Date.now());
 
         // 音声ストリームを購読
-        const audioStream = receiver.subscribe(userId, {
+        const opusStream = receiver.subscribe(userId, {
             end: {
                 behavior: EndBehaviorType.AfterSilence,
                 duration: this.silenceDuration,
             },
         });
 
+        // Opusデコーダーを作成 (48kHz, 2ch)
+        const decoder = new prism.opus.Decoder({
+            rate: 48000,
+            channels: 2,
+            frameSize: 960,
+        });
+
+        // Opusストリームをデコーダーにパイプ
+        const pcmStream = opusStream.pipe(decoder);
+
         let chunkCount = 0;
 
-        audioStream.on('data', (chunk: Buffer) => {
+        pcmStream.on('data', (chunk: Buffer) => {
             const buffers = this.userAudioBuffers.get(userId);
             if (buffers) {
                 buffers.push(chunk);
@@ -195,7 +206,9 @@ export class DiscordVoice extends EventEmitter {
 
                 // 最大長チェック
                 const totalBytes = buffers.reduce((sum, b) => sum + b.length, 0);
-                const durationMs = (totalBytes / 4) / 48 * 1000;  // 48kHz stereo 16bit
+                // PCMデータなのでバイト数から時間を計算可能 (48kHz * 2ch * 2bytes = 192000 bytes/sec)
+                // totalBytes / 4 (サンプル数) / 48 (kHz) = ms
+                const durationMs = (totalBytes / 4) / 48;
 
                 if (durationMs >= this.maxAudioDurationMs) {
                     console.log(`[DiscordVoice] Max duration reached for user ${userId}, flushing`);
@@ -204,13 +217,17 @@ export class DiscordVoice extends EventEmitter {
             }
         });
 
-        audioStream.on('end', () => {
+        pcmStream.on('end', () => {
             console.log(`[DiscordVoice] Audio stream ended for user ${userId}, chunks: ${chunkCount}`);
             this.scheduleAudioFlush(userId);
         });
 
-        audioStream.on('error', (error) => {
+        pcmStream.on('error', (error: any) => {
             console.error(`[DiscordVoice] Audio stream error for user ${userId}:`, error);
+        });
+
+        opusStream.on('error', (error: any) => {
+            console.error(`[DiscordVoice] Opus stream error for user ${userId}:`, error);
         });
     }
 
