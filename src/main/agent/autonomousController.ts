@@ -36,6 +36,9 @@ export class AutonomousController extends EventEmitter {
     // LLMハンドラ（外部から注入）
     private llmHandler: ((prompt: string) => Promise<string>) | null = null;
 
+    // Discordハンドラ（外部から注入）
+    private discordHandler: ((message: string, options?: { channelId?: string }) => Promise<void>) | null = null;
+
     constructor() {
         super();
         this.setupEventListeners();
@@ -69,6 +72,15 @@ export class AutonomousController extends EventEmitter {
      */
     setLLMHandler(handler: (prompt: string) => Promise<string>): void {
         this.llmHandler = handler;
+    }
+
+    /**
+     * Discordハンドラを設定
+     * 自律発話をDiscordに送信するための関数を外部から注入
+     */
+    setDiscordHandler(handler: (message: string, options?: { channelId?: string }) => Promise<void>): void {
+        this.discordHandler = handler;
+        console.log('[Autonomous] Discord handler set');
     }
 
     /**
@@ -203,12 +215,22 @@ export class AutonomousController extends EventEmitter {
 
         console.log(`[Autonomous] Executing "${action}": ${message.substring(0, 50)}...`);
 
-        // イベントを発行
+        // イベントを発行（ローカルUI用）
         this.emit('action', {
             type: action,
             message,
             timestamp: Date.now(),
         });
+
+        // Discordにも送信
+        if (this.discordHandler) {
+            try {
+                await this.discordHandler(message);
+                console.log(`[Autonomous] Message sent to Discord`);
+            } catch (error) {
+                console.error('[Autonomous] Discord send failed:', error);
+            }
+        }
 
         this.pendingAction = null;
     }

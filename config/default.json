@@ -1,0 +1,175 @@
+{
+  "_comment": "AI対話エージェントのデフォルト設定ファイル",
+  "_usage": [
+    "このファイルはデフォルト値を定義しています。",
+    "カスタマイズする場合は config/config.json を作成し、変更したい項目のみ記述してください。",
+    "環境変数で上書きも可能です（例: OLLAMA_BASE_URL, VOICEVOX_BASE_URL）"
+  ],
+
+  "llm": {
+    "_comment": "LLM（大規模言語モデル）設定",
+
+    "ollama": {
+      "_comment": "Ollama（ローカルLLM）設定",
+      "baseUrl": "http://localhost:11434",
+      "model": "gemma3:latest",
+      "healthCheckTimeoutMs": 2000
+    },
+
+    "anthropic": {
+      "_comment": "Anthropic（Claude API）設定 - APIキーは環境変数 ANTHROPIC_API_KEY で設定",
+      "model": "claude-sonnet-4-20250514",
+      "maxTokens": 1024
+    },
+
+    "preference": "local-first"
+  },
+
+  "stt": {
+    "_comment": "音声認識（Speech-to-Text）設定",
+
+    "provider": "faster-whisper",
+
+    "fasterWhisper": {
+      "_comment": "Faster-Whisper設定（Pythonサーバー）",
+      "serverUrl": "http://127.0.0.1:5001",
+      "model": "small",
+      "device": "cuda",
+      "computeType": "float16",
+      "serverStartupTimeoutMs": 300000,
+      "healthCheckIntervalMs": 1000,
+      "transcriptionTimeoutMs": 30000
+    }
+  },
+
+  "tts": {
+    "_comment": "音声合成（Text-to-Speech）設定",
+
+    "voicevox": {
+      "_comment": "VOICEVOX設定 - Dockerで起動推奨",
+      "baseUrl": "http://localhost:50021",
+      "speakerId": 14,
+      "speedScale": 1.3
+    }
+  },
+
+  "memory": {
+    "_comment": "記憶システム設定",
+
+    "embedding": {
+      "_comment": "テキストのベクトル化設定",
+      "provider": "xenova",
+      "xenova": {
+        "model": "Xenova/multilingual-e5-small",
+        "dimension": 384
+      },
+      "ollama": {
+        "model": "nomic-embed-text",
+        "dimension": 768
+      }
+    },
+
+    "vectorStore": {
+      "_comment": "ベクトルストア（記憶保存）設定",
+      "defaultSearchLimit": 5,
+      "lowImportanceThreshold": 0.3,
+      "forgetCandidateLimit": 10
+    },
+
+    "lifecycle": {
+      "_comment": "記憶ライフサイクル（メンテナンス）設定",
+      "compressionAgeDays": 7,
+      "compressionMinCount": 3,
+      "forgetImportanceThreshold": 0.4,
+      "evaluationLimit": 5,
+      "maintenanceIntervalMs": 3600000
+    },
+
+    "contextSearchLimit": 3,
+    "contextMinScore": 0.4
+  },
+
+  "autonomous": {
+    "_comment": [
+      "自律行動（AIからの自発的発話）設定",
+      "テスト時は AUTONOMOUS_TEST=true で短い間隔に切り替え可能"
+    ],
+    "enabled": true,
+    "minIntervalMs": 1800000,
+    "maxDailyActions": 5,
+    "workDurationMs": 3600000,
+    "idleThresholdMs": 300000,
+    "greetingIdleThresholdSeconds": 600
+  },
+
+  "idleDetector": {
+    "_comment": "アイドル（無操作）検出設定",
+    "idleThresholdSeconds": 300,
+    "checkIntervalMs": 60000
+  },
+
+  "screenRecognition": {
+    "_comment": "画面認識設定 - プライバシーに配慮してスクリーンショットはデフォルト無効",
+    "windowMonitorEnabled": true,
+    "screenshotEnabled": false,
+    "reactToWindowChange": true,
+    "screenshotIntervalMs": 300000,
+    "minReactionIntervalMs": 60000,
+    "windowPollIntervalMs": 2000,
+    "screenshot": {
+      "maxWidth": 800,
+      "quality": 60
+    }
+  },
+
+  "discord": {
+    "_comment": "Discord Bot設定 - トークンは環境変数 DISCORD_BOT_TOKEN で設定",
+    "prefix": "!ai",
+    "maxMessageLength": 2000,
+    "voice": {
+      "silenceDurationMs": 2000,
+      "minAudioDurationMs": 500,
+      "maxAudioDurationMs": 30000,
+      "inputSampleRate": 48000,
+      "outputSampleRate": 16000
+    },
+    "autonomous": {
+      "_comment": "Discord内での自律発話設定",
+      "enabled": true,
+      "sendToTextChannel": true,
+      "speakInVoice": true,
+      "defaultChannelId": null
+    }
+  },
+
+  "prompts": {
+    "_comment": "プロンプト設定 - AIの応答スタイルをカスタマイズ",
+
+    "system": "あなたは親切なAIアシスタントです。ユーザーとの過去のやり取りから得た情報を活用して、パーソナライズされた応答を行ってください。",
+
+    "autonomous": {
+      "_comment": "自律行動用プロンプト",
+      "breakSuggestion": "ユーザーが長時間作業しています。休憩を提案する短いメッセージを生成してください。親しみやすく、押し付けがましくない口調で。50文字以内で。",
+      "greeting": "ユーザーが戻ってきました。おかえりなさいの挨拶を生成してください。親しみやすい口調で。30文字以内で。",
+      "encouragement": "ユーザーを励ます短いメッセージを生成してください。元気が出るような口調で。40文字以内で。",
+      "reminder": "優しいリマインダーメッセージを生成してください。30文字以内で。",
+      "weatherInfo": "天気に関する短い一言を生成してください。30文字以内で。",
+      "tip": "プログラミングや生産性に関する豆知識を一つ教えてください。50文字以内で。"
+    },
+
+    "screenRecognition": {
+      "_comment": "画面認識用プロンプト - ${変数}はアプリ側で置換されます",
+      "youtube": "ユーザーがYouTubeで「${videoTitle}」を見始めました。興味を持った短い一言コメントを生成してください。押し付けがましくなく、30文字以内で。",
+      "game": "ユーザーがゲーム（${app}）を起動しました。楽しんでねという短い一言を生成してください。30文字以内で。",
+      "devSite": "ユーザーが${siteName}を見ています。開発者向けの短い励ましの一言を生成してください。30文字以内で。",
+      "screenshotAnalysis": "この画面のスクリーンショットを見て、ユーザーが何をしているか簡潔に説明してください。プライバシーに配慮し、具体的な個人情報は含めないでください。50文字以内で。",
+      "manualAnalysis": "この画面を見て、ユーザーの作業内容を簡潔に説明してください。100文字以内で。"
+    },
+
+    "memory": {
+      "_comment": "記憶管理用プロンプト",
+      "compression": "以下は過去の会話から抽出された記録です。これらを1〜2文の簡潔な要約に圧縮してください。重要な事実や出来事のみを残し、冗長な部分は削除してください。",
+      "evaluation": "以下の記憶情報を評価してください。この情報は今後のユーザーとの会話で役立つ可能性がありますか？"
+    }
+  }
+}

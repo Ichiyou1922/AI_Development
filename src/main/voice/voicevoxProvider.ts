@@ -1,4 +1,5 @@
 import { TTSProvider, Speaker, SpeakerStyle } from './types.js';
+import { VoicevoxConfig } from '../config/index.js';
 
 /**
  * VOICEVOX APIレスポンス型
@@ -27,15 +28,35 @@ interface AudioQuery {
 
 /**
  * VOICEVOX Engine を使用した音声合成プロバイダ
+ *
+ * 設定の変更方法:
+ * - config/config.json の tts.voicevox セクションを編集
+ * - または環境変数 VOICEVOX_BASE_URL, VOICEVOX_SPEAKER_ID を設定
+ *
+ * 話者IDの確認方法:
+ * - VOICEVOX Engine起動後、http://localhost:50021/speakers にアクセス
+ * - または tts-speakers IPC経由で取得可能
  */
 export class VoicevoxProvider implements TTSProvider {
     private baseUrl: string;
     private speakerId: number;
+    private speedScale: number;
     private ready: boolean = false;
 
-    constructor(baseUrl: string = 'http://localhost:50021', speakerId: number = 14) {
-        this.baseUrl = baseUrl;
-        this.speakerId = speakerId;
+    /**
+     * @param config - 設定オブジェクト（configLoader から取得）
+     *
+     * 使用例:
+     * ```typescript
+     * import { config } from '../config/index.js';
+     * const provider = new VoicevoxProvider(config.tts.voicevox);
+     * ```
+     */
+    constructor(config?: Partial<VoicevoxConfig>) {
+        // デフォルト値（configLoader が初期化される前のフォールバック）
+        this.baseUrl = config?.baseUrl ?? 'http://localhost:50021';
+        this.speakerId = config?.speakerId ?? 14;
+        this.speedScale = config?.speedScale ?? 1.3;
     }
 
     async initialize(): Promise<void> {
@@ -81,8 +102,8 @@ export class VoicevoxProvider implements TTSProvider {
 
         const audioQuery: AudioQuery = await queryResponse.json();
 
-        // 読み上げ速度を上げる
-        audioQuery.speedScale = 1.3;
+        // 読み上げ速度を設定値で上書き
+        audioQuery.speedScale = this.speedScale;
 
         // Step 2: 音声合成
         const synthesisResponse = await fetch(

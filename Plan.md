@@ -31,4 +31,4 @@ docker run --rm --gpus all -p 50021:50021 voicevox/voicevox_engine:nvidia-ubuntu
 
 Discordの音声入力はうまくいった
 原因はDiscordの音声データの形式（Opus）とwhisperが受け取りたいデータ形式（PCM）の乖離にあった．
-デコードの部分を追加して解決
+デコードの部分を追加して解決(prism-media + opusscriptを使用)

@@ -1,0 +1,34 @@
+{
+  "_comment": [
+    "このファイルは設定のサンプルです。",
+    "config.json にコピーして、変更したい項目のみ残してください。",
+    "指定しない項目は default.json の値が使用されます。"
+  ],
+
+  "llm": {
+    "_comment": "使用するモデルやプロバイダを変更する場合",
+    "ollama": {
+      "model": "gemma3:latest"
+    },
+    "preference": "local-first"
+  },
+
+  "tts": {
+    "_comment": "話者を変更する場合",
+    "voicevox": {
+      "speakerId": 14,
+      "speedScale": 1.3
+    }
+  },
+
+  "autonomous": {
+    "_comment": "自律発話を無効化する場合",
+    "enabled": true,
+    "minIntervalMs": 1800000
+  },
+
+  "prompts": {
+    "_comment": "システムプロンプトをカスタマイズする場合",
+    "system": "あなたは親切なAIアシスタントです。ユーザーとの過去のやり取りから得た情報を活用して、パーソナライズされた応答を行ってください。"
+  }
+}

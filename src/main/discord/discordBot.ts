@@ -368,4 +368,42 @@ export class DiscordBot extends EventEmitter {
     isVoiceConnected(): boolean {
         return this.voice?.isConnected() ?? false;
     }
+
+    /**
+     * 自律発話をDiscordに送信
+     * テキストチャンネルへの送信 + 音声チャンネルでのTTS再生
+     * @param message 送信するメッセージ
+     * @param options オプション
+     */
+    async sendAutonomousMessage(
+        message: string,
+        options?: {
+            channelId?: string;      // 送信先チャンネル（省略時は最後にメッセージを受信したチャンネル）
+            speakInVoice?: boolean;  // 音声チャンネルでも発話するか（デフォルト: true）
+        }
+    ): Promise<void> {
+        const { channelId, speakInVoice = true } = options ?? {};
+
+        // テキストチャンネルに送信
+        if (channelId) {
+            try {
+                await this.sendMessage(channelId, message);
+                console.log(`[DiscordBot] Autonomous message sent to channel ${channelId}`);
+            } catch (error) {
+                console.error('[DiscordBot] Failed to send autonomous message:', error);
+            }
+        }
+
+        // 音声チャンネルに参加中なら音声でも発話
+        if (speakInVoice && this.isVoiceConnected()) {
+            this.emit('autonomousVoice', { text: message });
+        }
+    }
+
+    /**
+     * 設定されたチャンネルリストを取得（autonomous用）
+     */
+    getAllowedChannels(): string[] | undefined {
+        return this.config.allowedChannels;
+    }
 }

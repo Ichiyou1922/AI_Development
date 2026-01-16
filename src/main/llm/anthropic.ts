@@ -1,19 +1,40 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { LLMProvider, LLMMessage, LLMResponse, StreamCallbacks } from './types.js';
 import { ToolRegistry, ToolDefinition } from './tools/index.js';
+import { AnthropicConfig } from '../config/index.js';
 
 // Anthropic APIのメッセージ型
 type AnthropicMessage = Anthropic.MessageParam;
 type AnthropicContent = Anthropic.ContentBlockParam;
 
+/**
+ * Anthropic（Claude）プロバイダ
+ *
+ * 設定の変更方法:
+ * - config/config.json の llm.anthropic セクションを編集
+ * - APIキーは環境変数 ANTHROPIC_API_KEY で設定
+ */
 export class AnthropicProvider implements LLMProvider {
   name = 'anthropic';
   private client: Anthropic;
   private toolRegistry: ToolRegistry;
+  private model: string;
+  private maxTokens: number;
 
-  constructor(apiKey: string | undefined, toolRegistry?: ToolRegistry) {
+  /**
+   * @param apiKey - Anthropic APIキー（環境変数から取得推奨）
+   * @param toolRegistry - ツールレジストリ
+   * @param config - 設定オブジェクト（configLoader から取得）
+   */
+  constructor(
+    apiKey: string | undefined,
+    toolRegistry?: ToolRegistry,
+    config?: Partial<AnthropicConfig>
+  ) {
     this.client = new Anthropic({ apiKey });
     this.toolRegistry = toolRegistry || new ToolRegistry();
+    this.model = config?.model ?? 'claude-sonnet-4-20250514';
+    this.maxTokens = config?.maxTokens ?? 1024;
   }
 
   async sendMessageStream(
@@ -29,9 +50,9 @@ export class AnthropicProvider implements LLMProvider {
       let fullText = '';
 
       while (continueLoop) {
-        const stream = await this.client.messages.stream({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1024,
+        const stream = this.client.messages.stream({
+          model: this.model,
+          max_tokens: this.maxTokens,
           messages: anthropicMessages,
           tools: tools.length > 0 ? tools : undefined,
         });

@@ -11,7 +11,6 @@ import {
     UserProfile,
     MemoryLifecycle,
 } from './memory/index.js';
-// import { WhisperProvider } from './voice/whisperProvider.js';
 import { MicrophoneCapture } from './voice/microphoneCapture.js';
 import { CaptureState } from './voice/types.js';
 import { VoicevoxProvider } from './voice/voicevoxProvider.js';
@@ -27,7 +26,8 @@ import {
     AgentEvent,
 } from './events/index.js';
 import { autonomousController } from './agent/index.js';
-import { getIdleDetectorConfig } from './config/index.js';
+// 設定システム
+import { initConfig, config, getIdleDetectorConfig } from './config/index.js';
 import { screenshotCapture, ScreenContext, screenRecognitionController } from './screen/index.js';
 import { AlwaysOnListener, ListenerConfig } from './mascot/alwaysOnListener.js';
 import { STTRouter } from './voice/sttRouter.js';
@@ -52,7 +52,8 @@ let mascotWindow: MascotWindow | null = null;
 // read .env
 dotenv.config();
 
-const llmRouter = new LLMRouter('local-first');
+// LLMRouterは設定読み込み後に初期化するため、letで宣言
+let llmRouter: LLMRouter;
 let vectorStore: VectorStore;
 let memoryManager: MemoryManager;
 
@@ -843,6 +844,19 @@ ipcMain.handle('stt-switch-provider', async (_event, type: 'whisper-cpp' | 'fast
 });
 
 app.whenReady().then(async () => {
+    // ============================================================
+    // 設定システムの初期化（最初に実行）
+    // ============================================================
+    // config/default.json と config/config.json を読み込み、
+    // 環境変数で上書きした設定を生成します。
+    // 以降のモジュール初期化で config オブジェクトを参照します。
+    await initConfig();
+    console.log('[App] Configuration loaded');
+
+    // LLMルーター初期化（設定を使用）
+    llmRouter = new LLMRouter(config.llm);
+    console.log(`[App] LLM Router initialized (preference: ${config.llm.preference})`);
+
     // 会話ストレージ初期化
     conversationStorage = new ConversationStorage();
     await conversationStorage.initialize();
@@ -864,14 +878,14 @@ app.whenReady().then(async () => {
     console.log('[App] Memory system initialized');
 
     await createWindow();
-    // 定期メンテ（1時間ごと）
+    // 定期メンテナンス（設定ファイルで間隔を変更可能）
     setInterval(async () => {
         try {
             await memoryLifecycle.runMaintenance();
         } catch (error) {
-            console.error('[App] Mintenance failed:', error);
+            console.error('[App] Maintenance failed:', error);
         }
-    }, 60 * 60 * 1000); // 1時間
+    }, config.memory.lifecycle.maintenanceIntervalMs);
 
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) {
@@ -917,7 +931,8 @@ app.whenReady().then(async () => {
     }
 
     try {
-        voicevoxProvider = new VoicevoxProvider('http://localhost:50021');
+        // 設定ファイルからVOICEVOX設定を読み込み
+        voicevoxProvider = new VoicevoxProvider(config.tts.voicevox);
         await voicevoxProvider.initialize();
 
         audioPlayer = new AudioPlayer();
@@ -1104,6 +1119,34 @@ app.whenReady().then(async () => {
     autonomousController.on('debug', (data) => {
         mainWindow?.webContents.send('autonomous-debug', data);
     });
+
+    // DiscordハンドラをautonomousControllerに設定
+    if (discordBot) {
+        // Discordへの自律発話送信ハンドラ
+        autonomousController.setDiscordHandler(async (message: string, options?: { channelId?: string }) => {
+            if (!discordBot) return;
+
+            // チャンネルIDが指定されていない場合、設定されたチャンネルの最初を使用
+            const channelId = options?.channelId ?? discordBot.getAllowedChannels()?.[0];
+
+            await discordBot.sendAutonomousMessage(message, { channelId });
+        });
+
+        // Discord音声チャンネルでの自律発話TTS
+        discordBot.on('autonomousVoice', async (data: { text: string }) => {
+            if (ttsEnabled && discordBot) {
+                try {
+                    const audioBuffer = await voicevoxProvider.synthesize(data.text);
+                    await discordBot.playAudio(audioBuffer);
+                    console.log('[App] Autonomous voice played in Discord');
+                } catch (error) {
+                    console.error('[App] Autonomous Discord TTS failed:', error);
+                }
+            }
+        });
+
+        console.log('[App] Autonomous controller connected to Discord');
+    }
 
     // 自律チェック用タイマー（10分ごと）
     timerTrigger.register({

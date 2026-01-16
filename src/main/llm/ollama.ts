@@ -1,17 +1,43 @@
-import { LLMProvider, LLMMessage, StreamCallbacks  } from "./types.js";
+import { LLMProvider, LLMMessage, StreamCallbacks } from "./types.js";
+import { OllamaConfig } from "../config/index.js";
 
+/**
+ * Ollama プロバイダ
+ *
+ * ローカルで動作するLLMサーバー（Ollama）との通信を担当します。
+ *
+ * 設定の変更方法:
+ * - config/config.json の llm.ollama セクションを編集
+ * - または環境変数 OLLAMA_BASE_URL, OLLAMA_MODEL を設定
+ */
 export class OllamaProvider implements LLMProvider {
     name = 'ollama';
     private baseUrl: string;
     private model: string;
+    private healthCheckTimeoutMs: number;
 
-    constructor(model: string = 'gemma3:latest', baseUrl: string = 'http://localhost:11434') {
-        this.model = model;
-        this.baseUrl = baseUrl;
+    /**
+     * @param config - 設定オブジェクト（configLoader から取得）
+     *
+     * 使用例:
+     * ```typescript
+     * import { config } from '../config/index.js';
+     * const provider = new OllamaProvider(config.llm.ollama);
+     * ```
+     */
+    constructor(config?: Partial<OllamaConfig>) {
+        // デフォルト値（configLoader が初期化される前のフォールバック）
+        this.baseUrl = config?.baseUrl ?? 'http://localhost:11434';
+        this.model = config?.model ?? 'gemma3:latest';
+        this.healthCheckTimeoutMs = config?.healthCheckTimeoutMs ?? 2000;
     }
 
-    // 非ストリーミング sendMessage を削除。ストリーミング sendMessageStream を使用。
-
+    /**
+     * ストリーミングでメッセージを送信
+     *
+     * Ollamaの /api/chat エンドポイントを使用し、
+     * トークンごとにコールバックを呼び出します。
+     */
     async sendMessageStream(
         messages: LLMMessage[],
         callbacks: StreamCallbacks,
@@ -47,7 +73,7 @@ export class OllamaProvider implements LLMProvider {
                     const token = data.message.content;
                     callbacks.onToken(token);
                     fullText += token;
-                }  
+                }
             }
 
             callbacks.onDone(fullText);
@@ -58,15 +84,31 @@ export class OllamaProvider implements LLMProvider {
         }
     }
 
+    /**
+     * Ollamaサーバーが利用可能かチェック
+     *
+     * /api/tags エンドポイントにリクエストを送り、
+     * 応答があれば利用可能と判断します。
+     */
     async isAvailable(): Promise<boolean> {
         try {
             const response = await fetch(`${this.baseUrl}/api/tags`, {
                 method: 'GET',
-                signal: AbortSignal.timeout(2000),
+                signal: AbortSignal.timeout(this.healthCheckTimeoutMs),
             });
             return response.ok;
         } catch {
             return false;
         }
+    }
+
+    /** 現在のモデル名を取得（デバッグ用） */
+    getModel(): string {
+        return this.model;
+    }
+
+    /** 現在のベースURLを取得（デバッグ用） */
+    getBaseUrl(): string {
+        return this.baseUrl;
     }
 }

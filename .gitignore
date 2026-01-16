@@ -20,3 +20,6 @@ src/renderer/assets/Hiyori/
 src/renderer/lib/
 .venv
 __pycache__/
+
+# ユーザー設定ファイル（default.json と example は追跡する）
+config/config.json

@@ -2,16 +2,20 @@ import { STTProvider, TranscriptionResult } from './types.js';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { spawn, ChildProcess } from 'child_process';
-import { app } from 'electron';
+import { FasterWhisperConfig } from '../config/index.js';
 
 /**
  * faster-whisper を使用した高速音声認識プロバイダ
  * GPU推論対応（CUDA）
- * 
+ *
  * 要件:
  * - Python 3.8+
  * - faster-whisper (`pip install faster-whisper`)
  * - CUDA 11.x/12.x + cuDNN (GPU使用時)
+ *
+ * 設定の変更方法:
+ * - config/config.json の stt.fasterWhisper セクションを編集
+ * - または環境変数 WHISPER_SERVER_URL, WHISPER_MODEL, WHISPER_DEVICE, WHISPER_COMPUTE_TYPE を設定
  */
 export class FasterWhisperProvider implements STTProvider {
     private serverUrl: string;
@@ -20,22 +24,46 @@ export class FasterWhisperProvider implements STTProvider {
     private useServer: boolean;
     private scriptPath: string;
 
-    constructor(options?: {
-        serverUrl?: string;
-        useServer?: boolean;
-        scriptPath?: string;
-    }) {
-        this.serverUrl = options?.serverUrl ?? 'http://127.0.0.1:5001';
+    // 設定値（サーバー起動時に環境変数として渡す）
+    private model: string;
+    private device: string;
+    private computeType: string;
+    private serverStartupTimeoutMs: number;
+    private healthCheckIntervalMs: number;
+    private transcriptionTimeoutMs: number;
+
+    /**
+     * @param config - 設定オブジェクト（configLoader から取得）
+     * @param options - 追加オプション
+     *
+     * 使用例:
+     * ```typescript
+     * import { config } from '../config/index.js';
+     * const provider = new FasterWhisperProvider(config.stt.fasterWhisper);
+     * ```
+     */
+    constructor(
+        config?: Partial<FasterWhisperConfig>,
+        options?: {
+            useServer?: boolean;
+            scriptPath?: string;
+        }
+    ) {
+        // 設定値の読み込み（デフォルト値付き）
+        this.serverUrl = config?.serverUrl ?? 'http://127.0.0.1:5001';
+        this.model = config?.model ?? 'small';
+        this.device = config?.device ?? 'cuda';
+        this.computeType = config?.computeType ?? 'float16';
+        this.serverStartupTimeoutMs = config?.serverStartupTimeoutMs ?? 300000;
+        this.healthCheckIntervalMs = config?.healthCheckIntervalMs ?? 1000;
+        this.transcriptionTimeoutMs = config?.transcriptionTimeoutMs ?? 30000;
+
         this.useServer = options?.useServer ?? true;
 
         // スクリプトパスの決定
-        // 1. 明示的に指定された場合
-        // 2. プロジェクトルートのscripts/
-        // 3. appのリソースパス
         if (options?.scriptPath) {
             this.scriptPath = options.scriptPath;
         } else {
-            // process.cwd() はElectronの起動ディレクトリ
             this.scriptPath = path.join(process.cwd(), 'scripts', 'whisper_server.py');
         }
     }
@@ -118,12 +146,12 @@ export class FasterWhisperProvider implements STTProvider {
             }
         }
 
-        // 環境変数を設定
+        // 環境変数を設定（設定値を優先、環境変数でも上書き可能）
         const env = {
             ...process.env,
-            WHISPER_MODEL: process.env.WHISPER_MODEL ?? 'small',
-            WHISPER_DEVICE: process.env.WHISPER_DEVICE ?? 'cuda',
-            WHISPER_COMPUTE_TYPE: process.env.WHISPER_COMPUTE_TYPE ?? 'float16',
+            WHISPER_MODEL: process.env.WHISPER_MODEL ?? this.model,
+            WHISPER_DEVICE: process.env.WHISPER_DEVICE ?? this.device,
+            WHISPER_COMPUTE_TYPE: process.env.WHISPER_COMPUTE_TYPE ?? this.computeType,
         };
 
         this.serverProcess = spawn(pythonPath, [this.scriptPath], {
@@ -161,9 +189,9 @@ export class FasterWhisperProvider implements STTProvider {
         });
 
         // サーバー起動待ち（モデルロードに時間がかかる）
-        // 5分待機（初回はモデルのダウンロードがあるため時間がかかる）
-        const maxWait = 300000;
-        const interval = 1000;
+        // 初回はモデルのダウンロードがあるため時間がかかる
+        const maxWait = this.serverStartupTimeoutMs;
+        const interval = this.healthCheckIntervalMs;
         let waited = 0;
 
         while (waited < maxWait) {
@@ -217,7 +245,7 @@ export class FasterWhisperProvider implements STTProvider {
                     'Content-Type': 'audio/wav',
                 },
                 body: wavBuffer as any,
-                signal: AbortSignal.timeout(30000),  // 30秒タイムアウト
+                signal: AbortSignal.timeout(this.transcriptionTimeoutMs),
             });
 
             if (!response.ok) {
@@ -249,7 +277,7 @@ export class FasterWhisperProvider implements STTProvider {
             };
         } catch (error) {
             if (error instanceof Error && error.name === 'TimeoutError') {
-                throw new Error('Transcription timeout (30s)');
+                throw new Error(`Transcription timeout (${this.transcriptionTimeoutMs / 1000}s)`);
             }
             throw error;
         }
