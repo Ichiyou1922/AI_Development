@@ -130,7 +130,9 @@ async function processVoiceMessage(userText: string): Promise<string> {
             onToken: (token) => {
                 fullResponse += token;
 
+                fullResponse += token;
                 mainWindow?.webContents.send('llm-token', { token });
+                mascotWindow?.getWindow()?.webContents.send('llm-token', { token });
             },
             onDone: async (fullText) => {
                 fullResponse = fullText;
@@ -149,6 +151,7 @@ async function processVoiceMessage(userText: string): Promise<string> {
                 }
 
                 mainWindow?.webContents.send('llm-done', { fullText });
+                mascotWindow?.getWindow()?.webContents.send('llm-done', { fullText });
                 resolve();
             },
             onError: (error) => {
@@ -232,6 +235,7 @@ async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string
         llmRouter.sendMessageStream(history, {
             onToken: (token) => {
                 fullResponse += token;
+                mascotWindow?.getWindow()?.webContents.send('llm-token', { token });
             },
             onDone: async (fullText) => {
                 fullResponse = fullText;
@@ -249,6 +253,7 @@ async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string
                     console.error('[Discord] Memory extraction failed:', error);
                 }
 
+                mascotWindow?.getWindow()?.webContents.send('llm-done', { fullText });
                 resolve();
             },
             onError: (error) => {
@@ -346,6 +351,7 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
         llmRouter.sendMessageStream(history, {
             onToken: (token) => {
                 fullResponse += token;
+                mascotWindow?.getWindow()?.webContents.send('llm-token', { token });
             },
             onDone: async (fullText) => {
                 fullResponse = fullText;
@@ -353,6 +359,7 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
                 // assistant message save
                 await conversationStorage.addMessage(activeConversationId!, 'assistant', fullText);
 
+                mascotWindow?.getWindow()?.webContents.send('llm-done', { fullText });
                 resolve();
             },
             onError: (error) => {
@@ -399,6 +406,11 @@ ipcMain.handle('conversation-get-active', () => {
 });
 
 // メッセージ送信IPC
+
+// IPC: ログ転送
+ipcMain.on('log', (_event, message: string) => {
+    console.log(message);
+});
 
 // IPC: メッセージストリーム
 ipcMain.handle('send-message-stream', async (_event, message: string) => {
@@ -467,6 +479,7 @@ ipcMain.handle('send-message-stream', async (_event, message: string) => {
             fullResponse += token;
             // Rendererにトークンを送信
             mainWindow?.webContents.send('llm-token', { token });
+            mascotWindow?.getWindow()?.webContents.send('llm-token', { token });
         },
         onDone: async (fullText) => {
             // アシスタントメッセージを保存
@@ -487,10 +500,12 @@ ipcMain.handle('send-message-stream', async (_event, message: string) => {
 
             // Rendererに完了通知
             mainWindow?.webContents.send('llm-done', { fullText });
+            mascotWindow?.getWindow()?.webContents.send('llm-done', { fullText });
         },
         onError: (error) => {
             // Rendererにエラー通知
             mainWindow?.webContents.send('llm-error', { error });
+            mascotWindow?.getWindow()?.webContents.send('llm-error', { error });
         }
     };
 
@@ -1010,6 +1025,7 @@ app.whenReady().then(async () => {
 
         audioPlayer.on('stateChange', (state) => {
             mainWindow?.webContents.send('tts-state', { state });
+            mascotWindow?.getWindow()?.webContents.send('tts-state', { state });
         });
 
         ttsEnabled = true;
@@ -1077,9 +1093,20 @@ app.whenReady().then(async () => {
                 if (ttsEnabled && discordBot) {
                     try {
                         const audioBuffer = await voicevoxProvider.synthesize(data.text);
+
+                        // 再生開始通知
+                        const playingState = { state: 'playing' };
+                        mascotWindow?.getWindow()?.webContents.send('tts-state', playingState);
+
                         await discordBot.playAudio(audioBuffer);
+
+                        // 再生終了通知
+                        const idleState = { state: 'idle' };
+                        mascotWindow?.getWindow()?.webContents.send('tts-state', idleState);
                     } catch (error) {
                         console.error('[Discord] TTS failed:', error);
+                        // エラー時もidleに戻す
+                        mascotWindow?.getWindow()?.webContents.send('tts-state', { state: 'idle' });
                     }
                 }
             });
@@ -1218,10 +1245,18 @@ app.whenReady().then(async () => {
             if (ttsEnabled && discordBot) {
                 try {
                     const audioBuffer = await voicevoxProvider.synthesize(data.text);
+
+                    // 再生開始通知
+                    mascotWindow?.getWindow()?.webContents.send('tts-state', { state: 'playing' });
+
                     await discordBot.playAudio(audioBuffer);
                     console.log('[App] Autonomous voice played in Discord');
+
+                    // 再生終了通知
+                    mascotWindow?.getWindow()?.webContents.send('tts-state', { state: 'idle' });
                 } catch (error) {
                     console.error('[App] Autonomous Discord TTS failed:', error);
+                    mascotWindow?.getWindow()?.webContents.send('tts-state', { state: 'idle' });
                 }
             }
         });
@@ -1329,10 +1364,14 @@ app.whenReady().then(async () => {
             let response = '';
             await new Promise<void>((resolve, reject) => {
                 llmRouter.sendMessageStream(history, {
-                    onToken: (token) => { response += token; },
+                    onToken: (token) => {
+                        response += token;
+                        mascotWindow?.getWindow()?.webContents.send('llm-token', { token });
+                    },
                     onDone: async (fullText) => {
                         response = fullText;
                         await conversationStorage.addMessage(activeConversationId!, 'assistant', fullText);
+                        mascotWindow?.getWindow()?.webContents.send('llm-done', { fullText });
                         resolve();
                     },
                     onError: (error) => reject(new Error(error)),

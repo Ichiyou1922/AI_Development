@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.removeAllListeners(channel);
     },
 
+    // ログ転送
+    log: (message: string) => ipcRenderer.send('log', message),
+
     // ============================================================
     // 記憶管理
     // ============================================================

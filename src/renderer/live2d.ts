@@ -124,11 +124,57 @@ function updateLipSync(): void {
     setParameter('ParamMouthOpenY', mouthOpenCurrent);
 }
 
+const EMOTION_SYMBOLS: Record<EmotionType, string> = {
+    neutral: '',
+    happy: '♥',
+    sad: '💧',
+    angry: '💢',
+    surprised: '!',
+    thinking: '?',
+};
+
+function updateEmotionSymbol(emotion: EmotionType): void {
+    const symbolEl = document.getElementById('emotion-symbol');
+    if (!symbolEl) {
+        console.warn('[Live2D] Emotion symbol element (#emotion-symbol) not found');
+        return;
+    }
+
+    const symbol = EMOTION_SYMBOLS[emotion];
+    console.log(`[Live2D] Updating symbol for emotion "${emotion}": "${symbol}"`);
+
+    symbolEl.textContent = symbol;
+
+    // Reset classes
+    symbolEl.className = '';
+
+    if (symbol) {
+        symbolEl.classList.add('active');
+
+        // Color customization
+        if (emotion === 'happy') symbolEl.style.color = '#ff69b4'; // HotPink
+        else if (emotion === 'sad') symbolEl.style.color = '#87ceeb'; // SkyBlue
+        else if (emotion === 'angry') symbolEl.style.color = '#ff4500'; // OrangeRed
+        else if (emotion === 'surprised') symbolEl.style.color = '#ffd700'; // Gold
+        else symbolEl.style.color = '#ffffff';
+
+        // Force redraw by accessing offsetHeight (sometimes helpful for CSS transitions)
+        void symbolEl.offsetHeight;
+        symbolEl.style.opacity = '1';
+    } else {
+        symbolEl.classList.remove('active');
+        symbolEl.style.opacity = '0';
+    }
+}
+
 function setEmotion(emotion: EmotionType): void {
     if (currentEmotion === emotion) return;
     console.log(`[Live2D] Emotion: ${currentEmotion} -> ${emotion}`);
     currentEmotion = emotion;
     targetParams = { ...EMOTION_PRESETS[emotion] };
+
+    // Update symbol
+    updateEmotionSymbol(emotion);
 }
 
 function updateExpression(): void {
@@ -195,18 +241,18 @@ let lipSyncPhase = 0;
 
 function startLipSync(): void {
     if (lipSyncInterval) return; // 既に動作中
-    
+
     lipSyncPhase = 0;
     lipSyncInterval = setInterval(() => {
         // 自然な口の動きをシミュレート（ランダム + サイン波）
         const base = (Math.sin(lipSyncPhase) + 1) / 2;
         const noise = Math.random() * 0.3;
         const value = Math.min(1, base * 0.7 + noise);
-        
+
         setMouthOpen(value);
         lipSyncPhase += 0.4;
     }, 50);
-    
+
     console.log('[Live2D] LipSync started');
 }
 
