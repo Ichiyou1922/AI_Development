@@ -19,6 +19,11 @@ import { IdentifiedAudio, VoiceChannelInfo, VoiceChannelMember } from './types.j
 
 /**
  * Discord音声チャンネル管理クラス
+ * 
+ * 修正点:
+ * 1. 音声バッファの最小長チェックを強化
+ * 2. 無音検出のタイミングを調整
+ * 3. デバッグログの追加
  */
 export class DiscordVoice extends EventEmitter {
     private client: Client;
@@ -30,10 +35,13 @@ export class DiscordVoice extends EventEmitter {
     // 話者ごとの音声バッファ
     private userAudioBuffers: Map<string, Buffer[]> = new Map();
     private userSilenceTimers: Map<string, NodeJS.Timeout> = new Map();
+    private userSpeakingStart: Map<string, number> = new Map();
 
-    // 設定
-    private silenceDuration: number = 1500;  // 無音判定時間（ms）
-    private minAudioLength: number = 16000;  // 最小音声長（サンプル数）
+    // 設定（調整済み）
+    private silenceDuration: number = 2000;      // 無音判定時間（ms）: 1500 → 2000
+    private minAudioDurationMs: number = 500;    // 最小音声長（ms）: 追加
+    private minAudioSamples: number = 8000;      // 最小サンプル数（16kHz * 0.5秒）
+    private maxAudioDurationMs: number = 30000;  // 最大音声長（ms）: 追加
 
     constructor(client: Client) {
         super();
@@ -117,6 +125,7 @@ export class DiscordVoice extends EventEmitter {
 
             // バッファをクリア
             this.userAudioBuffers.clear();
+            this.userSpeakingStart.clear();
             for (const timer of this.userSilenceTimers.values()) {
                 clearTimeout(timer);
             }
@@ -158,11 +167,15 @@ export class DiscordVoice extends EventEmitter {
             this.userSilenceTimers.delete(userId);
         }
 
-        // 既に購読中なら何もしない
-        if (this.userAudioBuffers.has(userId)) return;
+        // 既に購読中の場合は開始時刻のみ更新
+        if (this.userAudioBuffers.has(userId)) {
+            console.log(`[DiscordVoice] User ${userId} resuming speech (continuing buffer)`);
+            return;
+        }
 
         // 新しいバッファを作成
         this.userAudioBuffers.set(userId, []);
+        this.userSpeakingStart.set(userId, Date.now());
 
         // 音声ストリームを購読
         const audioStream = receiver.subscribe(userId, {
@@ -172,14 +185,27 @@ export class DiscordVoice extends EventEmitter {
             },
         });
 
+        let chunkCount = 0;
+
         audioStream.on('data', (chunk: Buffer) => {
             const buffers = this.userAudioBuffers.get(userId);
             if (buffers) {
                 buffers.push(chunk);
+                chunkCount++;
+
+                // 最大長チェック
+                const totalBytes = buffers.reduce((sum, b) => sum + b.length, 0);
+                const durationMs = (totalBytes / 4) / 48 * 1000;  // 48kHz stereo 16bit
+
+                if (durationMs >= this.maxAudioDurationMs) {
+                    console.log(`[DiscordVoice] Max duration reached for user ${userId}, flushing`);
+                    this.flushUserAudio(userId);
+                }
             }
         });
 
         audioStream.on('end', () => {
+            console.log(`[DiscordVoice] Audio stream ended for user ${userId}, chunks: ${chunkCount}`);
             this.scheduleAudioFlush(userId);
         });
 
@@ -201,7 +227,7 @@ export class DiscordVoice extends EventEmitter {
         // 少し待ってからフラッシュ（連続発話を結合）
         const timer = setTimeout(async () => {
             await this.flushUserAudio(userId);
-        }, 500);
+        }, 800);  // 500 → 800ms に延長
 
         this.userSilenceTimers.set(userId, timer);
     }
@@ -211,17 +237,30 @@ export class DiscordVoice extends EventEmitter {
      */
     private async flushUserAudio(userId: string): Promise<void> {
         const buffers = this.userAudioBuffers.get(userId);
+        const startTime = this.userSpeakingStart.get(userId);
+
         this.userAudioBuffers.delete(userId);
+        this.userSpeakingStart.delete(userId);
         this.userSilenceTimers.delete(userId);
 
-        if (!buffers || buffers.length === 0) return;
+        if (!buffers || buffers.length === 0) {
+            console.log(`[DiscordVoice] No audio data for user ${userId}`);
+            return;
+        }
 
         // バッファを結合
         const audioBuffer = Buffer.concat(buffers);
+        const durationMs = startTime ? Date.now() - startTime : 0;
 
-        // 短すぎる音声は無視
-        if (audioBuffer.length < this.minAudioLength) {
-            console.log(`[DiscordVoice] Audio too short from user ${userId}, ignoring`);
+        console.log(`[DiscordVoice] Raw audio from user ${userId}: ${audioBuffer.length} bytes, ${buffers.length} chunks, ~${durationMs}ms`);
+
+        // 最小長チェック（生データで判定）
+        // Discord: 48kHz, stereo, 16bit = 4 bytes per sample
+        const rawSamples = audioBuffer.length / 4;
+        const rawDurationMs = (rawSamples / 48000) * 1000;
+
+        if (rawDurationMs < this.minAudioDurationMs) {
+            console.log(`[DiscordVoice] Audio too short from user ${userId}: ${rawDurationMs.toFixed(0)}ms < ${this.minAudioDurationMs}ms, ignoring`);
             return;
         }
 
@@ -237,10 +276,17 @@ export class DiscordVoice extends EventEmitter {
             console.error('[DiscordVoice] Failed to fetch username:', error);
         }
 
-        console.log(`[DiscordVoice] Received audio from ${username} (${userId}): ${audioBuffer.length} bytes`);
+        // PCMに変換（リサンプリング）
+        const pcmBuffer = this.resampleTo16kMono(audioBuffer);
 
-        // PCMに変換（Opusデコード）
-        const pcmBuffer = await this.decodeToPCM(audioBuffer);
+        console.log(`[DiscordVoice] Resampled audio: ${pcmBuffer.length} bytes (${(pcmBuffer.length / 2 / 16000 * 1000).toFixed(0)}ms at 16kHz)`);
+
+        // 最終的なサンプル数チェック
+        const finalSamples = pcmBuffer.length / 2;  // 16bit mono
+        if (finalSamples < this.minAudioSamples) {
+            console.log(`[DiscordVoice] Resampled audio too short: ${finalSamples} samples < ${this.minAudioSamples}, ignoring`);
+            return;
+        }
 
         const identifiedAudio: IdentifiedAudio = {
             userId,
@@ -253,31 +299,31 @@ export class DiscordVoice extends EventEmitter {
     }
 
     /**
-     * OpusをPCMにデコード
-     */
-    private async decodeToPCM(opusBuffer: Buffer): Promise<Buffer> {
-        // @discordjs/voiceはデフォルトでPCMを出力
-        // 48kHz stereo → 16kHz monoへの変換
-        return this.resampleTo16kMono(opusBuffer);
-    }
-
-    /**
      * 48kHz stereo を 16kHz mono にリサンプル
+     * 
+     * 入力: 48kHz, 16bit, stereo (4 bytes per sample pair)
+     * 出力: 16kHz, 16bit, mono (2 bytes per sample)
      */
     private resampleTo16kMono(buffer: Buffer): Buffer {
-        // 入力: 48kHz, 16bit, stereo (4 bytes per sample)
-        // 出力: 16kHz, 16bit, mono (2 bytes per sample)
-
         const inputSampleRate = 48000;
         const outputSampleRate = 16000;
         const ratio = inputSampleRate / outputSampleRate;  // 3
 
-        const inputSamples = buffer.length / 4;  // stereo 16bit
-        const outputSamples = Math.floor(inputSamples / ratio);
+        // 入力: stereo なので 4 bytes = 1 sample pair (L + R)
+        const inputSamplePairs = Math.floor(buffer.length / 4);
+        const outputSamples = Math.floor(inputSamplePairs / ratio);
+
+        if (outputSamples <= 0) {
+            console.warn(`[DiscordVoice] Resample resulted in 0 samples (input: ${buffer.length} bytes)`);
+            return Buffer.alloc(0);
+        }
+
         const output = Buffer.alloc(outputSamples * 2);  // mono 16bit
 
         for (let i = 0; i < outputSamples; i++) {
             const srcIndex = Math.floor(i * ratio) * 4;
+
+            if (srcIndex + 3 >= buffer.length) break;
 
             // ステレオをモノラルに（左右の平均）
             const left = buffer.readInt16LE(srcIndex);
@@ -341,7 +387,7 @@ export class DiscordVoice extends EventEmitter {
                 members.push({
                     userId: memberId,
                     username: member.displayName,
-                    isSpeaking: false,  // TODO: 発話状態を追跡
+                    isSpeaking: false,
                 });
             }
 
@@ -370,5 +416,30 @@ export class DiscordVoice extends EventEmitter {
      */
     getCurrentChannelId(): string | null {
         return this.currentChannelId;
+    }
+
+    /**
+     * 設定を更新
+     */
+    updateConfig(config: {
+        silenceDuration?: number;
+        minAudioDurationMs?: number;
+        maxAudioDurationMs?: number;
+    }): void {
+        if (config.silenceDuration !== undefined) {
+            this.silenceDuration = config.silenceDuration;
+        }
+        if (config.minAudioDurationMs !== undefined) {
+            this.minAudioDurationMs = config.minAudioDurationMs;
+            this.minAudioSamples = Math.floor(16000 * config.minAudioDurationMs / 1000);
+        }
+        if (config.maxAudioDurationMs !== undefined) {
+            this.maxAudioDurationMs = config.maxAudioDurationMs;
+        }
+        console.log(`[DiscordVoice] Config updated:`, {
+            silenceDuration: this.silenceDuration,
+            minAudioDurationMs: this.minAudioDurationMs,
+            maxAudioDurationMs: this.maxAudioDurationMs,
+        });
     }
 }

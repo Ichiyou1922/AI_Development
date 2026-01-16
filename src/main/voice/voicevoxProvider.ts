@@ -75,7 +75,8 @@ export class VoicevoxProvider implements TTSProvider {
         );
 
         if (!queryResponse.ok) {
-            throw new Error(`AudioQuery failed: ${queryResponse.status}`);
+            const errorText = await queryResponse.text().catch(() => '');
+            throw new Error(`AudioQuery failed: ${queryResponse.status} - ${errorText}`);
         }
 
         const audioQuery: AudioQuery = await queryResponse.json();
@@ -91,7 +92,8 @@ export class VoicevoxProvider implements TTSProvider {
         );
 
         if (!synthesisResponse.ok) {
-            throw new Error(`Synthesis failed: ${synthesisResponse.status}`);
+            const errorText = await synthesisResponse.text().catch(() => '');
+            throw new Error(`Synthesis failed: ${synthesisResponse.status} - ${errorText}`);
         }
 
         const arrayBuffer = await synthesisResponse.arrayBuffer();

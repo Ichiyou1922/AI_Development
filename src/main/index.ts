@@ -11,7 +11,7 @@ import {
     UserProfile,
     MemoryLifecycle,
 } from './memory/index.js';
-import { WhisperProvider } from './voice/whisperProvider.js';
+// import { WhisperProvider } from './voice/whisperProvider.js';
 import { MicrophoneCapture } from './voice/microphoneCapture.js';
 import { CaptureState } from './voice/types.js';
 import { VoicevoxProvider } from './voice/voicevoxProvider.js';
@@ -29,10 +29,12 @@ import {
 import { autonomousController } from './agent/index.js';
 import { getIdleDetectorConfig } from './config/index.js';
 import { screenshotCapture, ScreenContext, screenRecognitionController } from './screen/index.js';
+import { AlwaysOnListener, ListenerConfig } from './mascot/alwaysOnListener.js';
+import { STTRouter } from './voice/sttRouter.js';
 
 let userProfile: UserProfile;
 let memoryLifecycle: MemoryLifecycle;
-let whisperProvider: WhisperProvider;
+// let whisperProvider: WhisperProvider;
 let microphoneCapture: MicrophoneCapture;
 let voiceEnabled: boolean = false;
 let voicevoxProvider: VoicevoxProvider;
@@ -40,6 +42,8 @@ let audioPlayer: AudioPlayer;
 let ttsEnabled: boolean = false;
 let voiceDialogue: VoiceDialogueController;
 let discordBot: DiscordBot | null = null;
+let sttRouter: STTRouter;
+let alwaysOnListener: AlwaysOnListener | null = null;
 
 // app.isQuittingはelectronTypes.d.tsで定義
 
@@ -223,7 +227,7 @@ async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string
 // Discord音声メッセージを処理
 async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<string> {
     // whisper
-    const transcription = await whisperProvider.transcribe(audio.audioBuffer, 16000);
+    const transcription = await sttRouter.transcribe(audio.audioBuffer, 16000);
     const userText = transcription.text.trim();
 
     if (!userText) {
@@ -799,6 +803,45 @@ ipcMain.handle('screen-get-context', () => {
     return screenRecognitionController.getCurrentContext();
 });
 
+// IPC: 常時リスニング制御
+ipcMain.handle('always-on-start', async () => {
+    if (!alwaysOnListener) {
+        return { success: false, error: 'AlwaysOnListener not available' };
+    }
+    try {
+        await alwaysOnListener.start();
+        return { success: true };
+    } catch (error) {
+        return { success: false, error: String(error) };
+    }
+});
+
+ipcMain.handle('always-on-stop', async () => {
+    if (!alwaysOnListener) {
+        return { success: false, error: 'AlwaysOnListener not available' };
+    }
+    alwaysOnListener.stop();
+    return { success: true };
+})
+
+ipcMain.handle('always-on-status', () => {
+    if (!alwaysOnListener) {
+        return { available: false };
+    }
+    return {
+        available: true,
+        ...alwaysOnListener.getStatus(),
+    };
+});
+
+ipcMain.handle('stt-switch-provider', async (_event, type: 'whisper-cpp' | 'faster-whisper') => {
+    if (!sttRouter) {
+        return { success: false, error: 'STTRouter not available' };
+    }
+    const success = await sttRouter.switchProvider(type);
+    return { success, activeProvider: sttRouter.getActiveProvider() };
+});
+
 app.whenReady().then(async () => {
     // 会話ストレージ初期化
     conversationStorage = new ConversationStorage();
@@ -837,8 +880,10 @@ app.whenReady().then(async () => {
     });
 
     try {
-        whisperProvider = new WhisperProvider('base');
-        await whisperProvider.initialize();
+        // whisperProvider = new WhisperProvider('base');
+        // await whisperProvider.initialize();
+        sttRouter = new STTRouter('faster-whisper');
+        await sttRouter.initialize();
 
 
 
@@ -849,7 +894,7 @@ app.whenReady().then(async () => {
         microphoneCapture.on('audioCapture', async (audioBuffer: Buffer) => {
             try {
                 console.log(`[Voice] Processing audio: ${audioBuffer.length} bytes`);
-                const result = await whisperProvider.transcribe(audioBuffer, 16000);
+                const result = await sttRouter.transcribe(audioBuffer, 16000);
                 console.log(`[Voice] Transcription: ${result.text}`);
 
                 // Rendererに音声認識結果を送信
@@ -892,7 +937,7 @@ app.whenReady().then(async () => {
     if (voiceEnabled && ttsEnabled) {
         voiceDialogue = new VoiceDialogueController(
             microphoneCapture,
-            whisperProvider,
+            sttRouter,
             voicevoxProvider,
             audioPlayer,
         );
@@ -1112,6 +1157,82 @@ app.whenReady().then(async () => {
     });
 
     console.log('[App] Screen recognition initialized');
+
+    // ============================================================
+    // STTルーターの初期化
+    // ============================================================
+    try {
+        sttRouter = new STTRouter('faster-whisper');
+        await sttRouter.initialize();
+        console.log(`[App] ATT initialized: ${sttRouter.getActiveProvider()}`);
+    } catch (error) {
+        console.error('[App] ATT initialization failed:', error);
+    }
+
+    // 常時リスニングを設定（DiscordBot起動後）
+    if (discordBot && sttRouter && voicevoxProvider) {
+        const listenerConfig: ListenerConfig = {
+            enabled: true,
+            respondToAllUsers: true,
+        };
+
+        alwaysOnListener = new AlwaysOnListener(
+            discordBot,
+            sttRouter,
+            voicevoxProvider,
+            listenerConfig
+        );
+
+        // LLMハンドラを設定
+        alwaysOnListener.setLLMHandler(async (text, UserContextMenuCommandInteraction, username) => {
+            // 会話履歴に追加
+            if (!activeConversationId) {
+                const conv = await conversationStorage.create(`Discord: ${username}`);
+                activeConversationId = conv.id;
+            }
+
+            const messageWithSpeaker = `[${username}]: ${text}`;
+            await conversationStorage.addMessage(activeConversationId, 'user', messageWithSpeaker);
+
+            // 記憶検索+LLM呼び出し
+            const context = await memoryManager.buildContextForPrompt(text);
+            const conversation = await conversationStorage.load(activeConversationId);
+            const history = conversation!.messages.map(m => ({
+                role: m.role,
+                content: m.content,
+            }));
+
+            let response = '';
+            await new Promise<void>((resolve, reject) => {
+                llmRouter.sendMessageStream(history, {
+                    onToken: (token) => { response += token; },
+                    onDone: async (fullText) => {
+                        response = fullText;
+                        await conversationStorage.addMessage(activeConversationId!, 'assistant', fullText);
+                        resolve();
+                    },
+                    onError: (error) => reject(new Error(error)),
+                });
+            });
+
+            return response;
+        });
+
+        // イベントをrendererに転送
+        alwaysOnListener.on('transcribed', (data: any) => {
+            mainWindow?.webContents.send('always-on-transcribed', data);
+        });
+
+        alwaysOnListener.on('response', (data: any) => {
+            mainWindow?.webContents.send('always-on-response', data);
+        });
+
+        alwaysOnListener.on('spoken', (data: any) => {
+            mainWindow?.webContents.send('always-on-spoken', data);
+        });
+
+        console.log('[App] AlwaysOnListener initialized');
+    }
 });
 
 app.on('before-quit', async () => {

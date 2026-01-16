@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { MicrophoneCapture } from './microphoneCapture.js';
-import { WhisperProvider } from './whisperProvider.js';
+import { STTProvider } from './types.js';
 import { VoicevoxProvider } from './voicevoxProvider.js';
 import { AudioPlayer } from './audioPlayer.js';
 
@@ -31,7 +31,7 @@ export interface DialogueEvents {
  */
 export class VoiceDialogueController extends EventEmitter {
     private micCapture: MicrophoneCapture;
-    private whisper: WhisperProvider;
+    private stt: STTProvider;
     private voicevox: VoicevoxProvider;
     private audioPlayer: AudioPlayer;
 
@@ -44,13 +44,13 @@ export class VoiceDialogueController extends EventEmitter {
 
     constructor(
         micCapture: MicrophoneCapture,
-        whisper: WhisperProvider,
+        stt: STTProvider,
         voicevox: VoicevoxProvider,
         audioPlayer: AudioPlayer
     ) {
         super();
         this.micCapture = micCapture;
-        this.whisper = whisper;
+        this.stt = stt;
         this.voicevox = voicevox;
         this.audioPlayer = audioPlayer;
 
@@ -145,7 +145,7 @@ export class VoiceDialogueController extends EventEmitter {
             this.setState('transcribing');
 
             // STT: 音声→テキスト
-            const result = await this.whisper.transcribe(audioBuffer, 16000);
+            const result = await this.stt.transcribe(audioBuffer, 16000);
             const userText = result.text.trim();
 
             if (!userText) {

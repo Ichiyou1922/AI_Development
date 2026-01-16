@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
+
 contextBridge.exposeInMainWorld('electronAPI', {
     // ============================================================
     // 会話管理
