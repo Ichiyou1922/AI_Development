@@ -123,6 +123,7 @@ const DEFAULT_CONFIG: AppConfig = {
     discord: {
         prefix: '!ai',
         maxMessageLength: 2000,
+        admin: null,
         voice: {
             silenceDurationMs: 2000,
             minAudioDurationMs: 500,
@@ -130,24 +131,18 @@ const DEFAULT_CONFIG: AppConfig = {
             inputSampleRate: 48000,
             outputSampleRate: 16000,
         },
+        autonomous: {
+            enabled: true,
+            sendToTextChannel: true,
+            speakInVoice: true,
+            defaultChannelId: null,
+        },
     },
     prompts: {
+        character: {
+            name: 'AI',
+        },
         system: 'あなたは親切なAIアシスタントです。ユーザーとの過去のやり取りから得た情報を活用して、パーソナライズされた応答を行ってください。',
-        autonomous: {
-            breakSuggestion: 'ユーザーが長時間作業しています。休憩を提案する短いメッセージを生成してください。親しみやすく、押し付けがましくない口調で。50文字以内で。',
-            greeting: 'ユーザーが戻ってきました。おかえりなさいの挨拶を生成してください。親しみやすい口調で。30文字以内で。',
-            encouragement: 'ユーザーを励ます短いメッセージを生成してください。元気が出るような口調で。40文字以内で。',
-            reminder: '優しいリマインダーメッセージを生成してください。30文字以内で。',
-            weatherInfo: '天気に関する短い一言を生成してください。30文字以内で。',
-            tip: 'プログラミングや生産性に関する豆知識を一つ教えてください。50文字以内で。',
-        },
-        screenRecognition: {
-            youtube: 'ユーザーがYouTubeで「${videoTitle}」を見始めました。興味を持った短い一言コメントを生成してください。押し付けがましくなく、30文字以内で。',
-            game: 'ユーザーがゲーム（${app}）を起動しました。楽しんでねという短い一言を生成してください。30文字以内で。',
-            devSite: 'ユーザーが${siteName}を見ています。開発者向けの短い励ましの一言を生成してください。30文字以内で。',
-            screenshotAnalysis: 'この画面のスクリーンショットを見て、ユーザーが何をしているか簡潔に説明してください。プライバシーに配慮し、具体的な個人情報は含めないでください。50文字以内で。',
-            manualAnalysis: 'この画面を見て、ユーザーの作業内容を簡潔に説明してください。100文字以内で。',
-        },
         memory: {
             compression: '以下は過去の会話から抽出された記録です。これらを1〜2文の簡潔な要約に圧縮してください。重要な事実や出来事のみを残し、冗長な部分は削除してください。',
             evaluation: '以下の記憶情報を評価してください。この情報は今後のユーザーとの会話で役立つ可能性がありますか？',
@@ -204,8 +199,8 @@ function getProjectRoot(): string {
     if (app && app.isPackaged) {
         return path.dirname(app.getAppPath());
     }
-    // src/main/config/configLoader.ts から見て 4階層上
-    return path.resolve(__dirname, '../../../../');
+    // dist/main/config/configLoader.js から見て 3階層上がプロジェクトルート
+    return path.resolve(__dirname, '../../');
 }
 
 /**
@@ -360,11 +355,14 @@ export async function initConfig(): Promise<AppConfig> {
     // 3. 環境変数で上書き
     mergedConfig = applyEnvironmentOverrides(mergedConfig);
 
-    // グローバル設定を更新
-    _config = mergedConfig;
+    // グローバル設定を更新（Proxyが参照し続けるオブジェクトを直接更新）
+    // _config = mergedConfig; は Proxy が古いオブジェクトを参照し続けるため NG
+    Object.keys(mergedConfig).forEach(key => {
+        (_config as any)[key] = (mergedConfig as any)[key];
+    });
 
     console.log('[Config] 設定の初期化が完了しました');
-    logConfigSummary(mergedConfig);
+    logConfigSummary(_config);
 
     return mergedConfig;
 }
@@ -401,6 +399,7 @@ function logConfigSummary(config: AppConfig): void {
     console.log(`  - TTS: VOICEVOX (話者ID: ${config.tts.voicevox.speakerId})`);
     console.log(`  - 自律行動: ${config.autonomous.enabled ? '有効' : '無効'} (間隔: ${config.autonomous.minIntervalMs / 60000}分)`);
     console.log(`  - 画面認識: ${config.screenRecognition.windowMonitorEnabled ? '有効' : '無効'}`);
+    console.log(`  - Discord admin: ${config.discord.admin ? `${config.discord.admin.name} (${config.discord.admin.id})` : '未設定'}`);
 }
 
 // ============================================================

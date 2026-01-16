@@ -126,6 +126,11 @@
     "_comment": "Discord Bot設定 - トークンは環境変数 DISCORD_BOT_TOKEN で設定",
     "prefix": "!ai",
     "maxMessageLength": 2000,
+    "admin": {
+      "_comment": "管理者（製作者）情報 - config.jsonで設定してください",
+      "id": "",
+      "name": ""
+    },
     "voice": {
       "silenceDurationMs": 2000,
       "minAudioDurationMs": 500,
@@ -145,9 +150,14 @@
   "prompts": {
     "_comment": "プロンプト設定 - AIの応答スタイルをカスタマイズ",
 
+    "character": {
+      "_comment": "AIキャラクター設定",
+      "name": "AI"
+    },
+
     "system": "あなたは親切なAIアシスタントです。ユーザーとの過去のやり取りから得た情報を活用して、パーソナライズされた応答を行ってください。",
 
-"memory": {
+    "memory": {
       "_comment": "記憶管理用プロンプト",
       "compression": "以下は過去の会話から抽出された記録です。これらを1〜2文の簡潔な要約に圧縮してください。重要な事実や出来事のみを残し、冗長な部分は削除してください。",
       "evaluation": "以下の記憶情報を評価してください。この情報は今後のユーザーとの会話で役立つ可能性がありますか？"

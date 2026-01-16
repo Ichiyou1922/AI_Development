@@ -15,6 +15,7 @@ import {
     VoiceChannelInfo,
 } from './types.js';
 import { DiscordVoice } from './discordVoice.js';
+import { getDiscordUserManager, DiscordUserManager } from '../memory/discordUsers.js';
 
 
 /**
@@ -26,6 +27,7 @@ export class DiscordBot extends EventEmitter {
     private state: DiscordBotState = 'disconnected';
     private voice: DiscordVoice | null = null;
     private voiceMessageHandler: ((audio: IdentifiedAudio) => Promise<string>) | null = null;
+    private userManager: DiscordUserManager;
 
     // 外部から注入されるメッセージ処理関数
     private messageHandler: ((ctx: DiscordMessageContext) => Promise<string>) | null = null;
@@ -33,6 +35,7 @@ export class DiscordBot extends EventEmitter {
     constructor(config: DiscordBotConfig) {
         super();
         this.config = config;
+        this.userManager = getDiscordUserManager();
 
         this.client = new Client({
             intents: [
@@ -137,17 +140,26 @@ export class DiscordBot extends EventEmitter {
 
         if (!content) return;
 
+        // ユーザー情報を記録・取得
+        this.userManager.recordUser(message.author.id, message.author.displayName);
+        const displayName = this.userManager.getName(message.author.id);
+        const isAdmin = this.userManager.isAdmin(message.author.id);
+        const userContext = this.userManager.formatUserContext(message.author.id, message.author.displayName);
+
         const ctx: DiscordMessageContext = {
             messageId: message.id,
             channelId: message.channelId,
             guildId: message.guildId,
             userId: message.author.id,
             username: message.author.username,
+            displayName,
+            userContext,
+            isAdmin,
             content,
             timestamp: message.createdAt,
         };
 
-        console.log(`[DiscordBot] Message from ${ctx.username}: ${ctx.content}`);
+        console.log(`[DiscordBot] Message from ${displayName || ctx.username} (${isAdmin ? 'admin' : 'user'}): ${ctx.content}`);
         this.emit('message', ctx);
 
         // メッセージハンドラが設定されていれば応答
@@ -405,5 +417,33 @@ export class DiscordBot extends EventEmitter {
      */
     getAllowedChannels(): string[] | undefined {
         return this.config.allowedChannels;
+    }
+
+    /**
+     * 管理者設定をセット
+     */
+    setAdminConfig(admin: { id: string; name: string } | null): void {
+        this.userManager.setAdminConfig(admin);
+    }
+
+    /**
+     * ユーザーの呼び名を設定
+     */
+    setUserName(discordId: string, name: string): boolean {
+        return this.userManager.setName(discordId, name);
+    }
+
+    /**
+     * ユーザーの呼び名を取得
+     */
+    getUserName(discordId: string): string | null {
+        return this.userManager.getName(discordId);
+    }
+
+    /**
+     * ユーザー管理の統計情報
+     */
+    getUserStats(): { total: number; named: number; admin: string | null } {
+        return this.userManager.getStats();
     }
 }

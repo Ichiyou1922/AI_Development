@@ -235,6 +235,13 @@ export interface DiscordConfig {
     prefix: string;
     /** メッセージの最大長 */
     maxMessageLength: number;
+    /** 管理者（製作者）情報 */
+    admin: {
+        /** Discord ユーザーID */
+        id: string;
+        /** 呼び名 */
+        name: string;
+    } | null;
     voice: {
         /** 無音判定時間（ミリ秒） */
         silenceDurationMs: number;
@@ -265,12 +272,25 @@ export interface DiscordConfig {
 // ============================================================
 
 /**
+ * AIキャラクター設定
+ *
+ * AIの名前や基本情報を設定します。
+ * 言語モデルが自分の名前を間違えないようにするために使用されます。
+ */
+export interface AICharacterConfig {
+    /** AIの名前 */
+    name: string;
+}
+
+/**
  * システムプロンプト設定
  *
  * AIの応答スタイルを決定する重要な設定です。
  * キャラクター性を変更したい場合はここを編集してください。
  */
 export interface PromptsConfig {
+    /** AIキャラクター設定 */
+    character: AICharacterConfig;
     /** メインのシステムプロンプト（自律行動・画面認識すべてに使用） */
     system: string;
     /** 記憶管理用プロンプト */

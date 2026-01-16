@@ -26,6 +26,12 @@ export interface DiscordMessageContext {
     guildId: string | null;
     userId: string;
     username: string;
+    /** ユーザーが設定した呼び名（設定されていればusernameより優先） */
+    displayName: string | null;
+    /** ユーザーコンテキスト（LLMに渡す用） */
+    userContext: string;
+    /** 管理者かどうか */
+    isAdmin: boolean;
     content: string;
     timestamp: Date;
 }

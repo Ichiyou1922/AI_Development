@@ -162,19 +162,29 @@ async function processVoiceMessage(userText: string): Promise<string> {
 }
 
 async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string> {
+    // デバッグログ
+    console.log('[Discord] Message context:', {
+        userId: ctx.userId,
+        username: ctx.username,
+        displayName: ctx.displayName,
+        isAdmin: ctx.isAdmin,
+        userContext: ctx.userContext,
+    });
+
     // アクティブ会話がなければ新規作成（Discord用に別管理も可能）
     if (!activeConversationId) {
-        const newConv = await conversationStorage.create(`Discord: ${ctx.username}`);
+        const speakerName = ctx.displayName || ctx.username;
+        const newConv = await conversationStorage.create(`Discord: ${speakerName}`);
         activeConversationId = newConv.id;
     }
 
-    // ユーザーメッセージを保存
+    // ユーザーメッセージを保存（ユーザーコンテキストなしで保存、履歴には残さない）
     await conversationStorage.addMessage(activeConversationId, 'user', ctx.content);
 
     // 記憶検索
-    let context = '';
+    let memoryContext = '';
     try {
-        context = await memoryManager.buildContextForPrompt(ctx.content);
+        memoryContext = await memoryManager.buildContextForPrompt(ctx.content);
     } catch (error) {
         console.error('[Discord] Context building failed:', error);
     }
@@ -185,10 +195,35 @@ async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string
         throw new Error('Conversation not found');
     }
 
-    const history: LLMMessage[] = conversation.messages.map(m => ({
-        role: m.role,
-        content: m.content,
-    }));
+    // システムプロンプトを構築（発言者情報 + 記憶コンテキスト）
+    const systemPromptParts: string[] = [config.prompts.system];
+
+    // AIの名前を追加（言語モデルが自分の名前を間違えないように）
+    const aiName = config.prompts.character.name;
+    systemPromptParts.push(`\n\n【あなたの名前】\nあなたの名前は「${aiName}」です。自分の名前を聞かれたら「${aiName}」と答えてください。`);
+
+    // 発言者情報を追加
+    const speakerName = ctx.displayName || ctx.username;
+    console.log('[Discord] Speaker name resolved to:', speakerName);
+    systemPromptParts.push(`\n\n【現在の発言者】\n${ctx.userContext}`);
+    systemPromptParts.push(`この人の名前は「${speakerName}」です。名前を呼んで話しかけてください。`);
+
+    // 記憶コンテキストがあれば追加
+    if (memoryContext) {
+        systemPromptParts.push(`\n\n【関連する記憶】\n${memoryContext}`);
+    }
+
+    const fullSystemPrompt = systemPromptParts.join('');
+
+    // 会話履歴をLLMメッセージ形式に変換（システムプロンプトを先頭に）
+    const history: LLMMessage[] = [
+        { role: 'user', content: fullSystemPrompt },
+        { role: 'assistant', content: 'わかった！' },
+        ...conversation.messages.map(m => ({
+            role: m.role,
+            content: m.content,
+        })),
+    ];
 
     // LLM呼び出し
     let fullResponse = '';
@@ -238,21 +273,34 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
 
     console.log((`[Discord Voice] ${audio.username}: "${userText}"`));
 
+    // ユーザー情報を取得（discordBotが初期化されている場合）
+    let speakerName = audio.username;
+    let userContext = `発言者: ${audio.username}`;
+    if (discordBot) {
+        const name = discordBot.getUserName(audio.userId);
+        if (name) {
+            speakerName = name;
+            const isAdmin = config.discord.admin?.id === audio.userId;
+            userContext = isAdmin ? `発言者: ${name}（管理者）` : `発言者: ${name}`;
+        }
+    }
+
+    console.log(`[Discord Voice] Speaker resolved to: ${speakerName}`);
+
     // message process
     // if active conversation is not set, create new conversation
     if (!activeConversationId) {
-        const newConv = await conversationStorage.create(`Discord Voice: ${audio.username}`);
+        const newConv = await conversationStorage.create(`Discord Voice: ${speakerName}`);
         activeConversationId = newConv.id;
     }
 
-    // user message save
-    const messageWithSpeaker = `[${audio.username}]: ${userText}`;
-    await conversationStorage.addMessage(activeConversationId, 'user', messageWithSpeaker);
+    // user message save（ユーザーコンテキストなしで保存）
+    await conversationStorage.addMessage(activeConversationId, 'user', userText);
 
     // memory search
-    let context = '';
+    let memoryContext = '';
     try {
-        context = await memoryManager.buildContextForPrompt(userText);
+        memoryContext = await memoryManager.buildContextForPrompt(userText);
     } catch (error) {
         console.log('[Discord Voice] Context building failed:', error);
     }
@@ -260,13 +308,36 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
     // get conversation history
     const conversation = await conversationStorage.load(activeConversationId);
     if (!conversation) {
-        throw new Error('Conversaition not found');
+        throw new Error('Conversation not found');
     }
 
-    const history: LLMMessage[] = conversation.messages.map(m => ({
-        role: m.role,
-        content: m.content,
-    }));
+    // システムプロンプトを構築（発言者情報 + 記憶コンテキスト）
+    const systemPromptParts: string[] = [config.prompts.system];
+
+    // AIの名前を追加（言語モデルが自分の名前を間違えないように）
+    const aiName = config.prompts.character.name;
+    systemPromptParts.push(`\n\n【あなたの名前】\nあなたの名前は「${aiName}」です。自分の名前を聞かれたら「${aiName}」と答えてください。`);
+
+    // 発言者情報を追加
+    systemPromptParts.push(`\n\n【現在の発言者】\n${userContext}`);
+    systemPromptParts.push(`この人の名前は「${speakerName}」です。名前を呼んで話しかけてください。`);
+
+    // 記憶コンテキストがあれば追加
+    if (memoryContext) {
+        systemPromptParts.push(`\n\n【関連する記憶】\n${memoryContext}`);
+    }
+
+    const fullSystemPrompt = systemPromptParts.join('');
+
+    // 会話履歴をLLMメッセージ形式に変換（システムプロンプトを先頭に）
+    const history: LLMMessage[] = [
+        { role: 'user', content: fullSystemPrompt },
+        { role: 'assistant', content: 'わかった！' },
+        ...conversation.messages.map(m => ({
+            role: m.role,
+            content: m.content,
+        })),
+    ];
 
     // LLM呼び出し
     let fullResponse = '';
@@ -988,8 +1059,13 @@ app.whenReady().then(async () => {
         try {
             discordBot = new DiscordBot({
                 token: discordToken,
-                prefix: '!ai',
+                prefix: config.discord.prefix,
             });
+
+            // admin設定を注入
+            if (config.discord.admin && config.discord.admin.id && config.discord.admin.name) {
+                discordBot.setAdminConfig(config.discord.admin);
+            }
 
             // text message handler setting
             discordBot.setMessageHandler(processDiscordMessage);

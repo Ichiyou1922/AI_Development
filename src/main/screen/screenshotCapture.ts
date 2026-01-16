@@ -8,7 +8,7 @@ export class ScreenshotCapture extends EventEmitter {
     private captureInterval: NodeJS.Timeout | null = null;
     private config = {
         enabled: true,
-        intervalMs: 5 * 60 * 1000,  // 5分ごと
+        intervalMs: 1 * 60 * 1000,  // 1分ごと
         maxWidth: 800,               // 最大幅
         quality: 60,                 // JPEG品質
     };
