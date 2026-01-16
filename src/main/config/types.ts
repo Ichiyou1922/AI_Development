@@ -271,25 +271,8 @@ export interface DiscordConfig {
  * キャラクター性を変更したい場合はここを編集してください。
  */
 export interface PromptsConfig {
-    /** メインのシステムプロンプト */
+    /** メインのシステムプロンプト（自律行動・画面認識すべてに使用） */
     system: string;
-    /** 自律行動用プロンプト */
-    autonomous: {
-        breakSuggestion: string;
-        greeting: string;
-        encouragement: string;
-        reminder: string;
-        weatherInfo: string;
-        tip: string;
-    };
-    /** 画面認識用プロンプト */
-    screenRecognition: {
-        youtube: string;
-        game: string;
-        devSite: string;
-        screenshotAnalysis: string;
-        manualAnalysis: string;
-    };
     /** 記憶管理用プロンプト */
     memory: {
         compression: string;

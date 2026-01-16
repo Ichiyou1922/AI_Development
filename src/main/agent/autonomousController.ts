@@ -10,18 +10,36 @@ import {
 } from '../config/index.js';
 
 /**
- * 自律行動の種類
+ * 状況コンテキスト（LLMに渡す情報）
  */
-export type AutonomousActionType =
-    | 'break_suggestion'    // 休憩提案
-    | 'greeting'            // 挨拶
-    | 'encouragement'       // 励まし
-    | 'reminder'            // リマインダー
-    | 'weather_info'        // 天気情報
-    | 'tip';                // 豆知識
+export interface SituationContext {
+    /** 現在時刻 */
+    currentTime: string;
+    /** 時間帯 */
+    timeOfDay: 'late_night' | 'early_morning' | 'morning' | 'afternoon' | 'evening' | 'night';
+    /** ユーザーの状態 */
+    userState: 'active' | 'idle' | 'returned';
+    /** アイドル時間（秒） */
+    idleTimeSeconds?: number;
+    /** 作業時間（分） */
+    workDurationMinutes?: number;
+    /** 画面情報（あれば） */
+    screenInfo?: {
+        app?: string;
+        title?: string;
+        url?: string;
+    };
+    /** トリガーとなったイベント */
+    trigger: 'idle' | 'active' | 'timer' | 'screen_change';
+    /** 追加メモ */
+    note?: string;
+}
 
 /**
  * 自律行動コントローラ
+ *
+ * 固定のアクションタイプではなく、状況をLLMに伝えて
+ * AI自身に判断させる方式。
  */
 export class AutonomousController extends EventEmitter {
     private config: AutonomousConfig = getAutonomousConfig();
@@ -31,10 +49,13 @@ export class AutonomousController extends EventEmitter {
     private lastResetDate: string = '';
     private workStartTime: number = Date.now();
     private isUserActive: boolean = true;
-    private pendingAction: AutonomousActionType | null = null;
+    private lastIdleTime: number = 0;
 
-    // LLMハンドラ（外部から注入）
-    private llmHandler: ((prompt: string) => Promise<string>) | null = null;
+    // システムプロンプト（外部から注入）
+    private systemPrompt: string = '';
+
+    // LLMハンドラ（外部から注入）- システムプロンプト付きで呼び出す
+    private llmHandler: ((systemPrompt: string, userMessage: string) => Promise<string>) | null = null;
 
     // Discordハンドラ（外部から注入）
     private discordHandler: ((message: string, options?: { channelId?: string }) => Promise<void>) | null = null;
@@ -68,15 +89,22 @@ export class AutonomousController extends EventEmitter {
     }
 
     /**
-     * LLMハンドラを設定
+     * システムプロンプトを設定
      */
-    setLLMHandler(handler: (prompt: string) => Promise<string>): void {
+    setSystemPrompt(prompt: string): void {
+        this.systemPrompt = prompt;
+        console.log('[Autonomous] System prompt set');
+    }
+
+    /**
+     * LLMハンドラを設定（新形式：システムプロンプト + ユーザーメッセージ）
+     */
+    setLLMHandler(handler: (systemPrompt: string, userMessage: string) => Promise<string>): void {
         this.llmHandler = handler;
     }
 
     /**
      * Discordハンドラを設定
-     * 自律発話をDiscordに送信するための関数を外部から注入
      */
     setDiscordHandler(handler: (message: string, options?: { channelId?: string }) => Promise<void>): void {
         this.discordHandler = handler;
@@ -105,19 +133,21 @@ export class AutonomousController extends EventEmitter {
     private handleIdle(event: AgentEvent): void {
         this.isUserActive = false;
         const idleTime = (event.data as any)?.idleTime || 0;
-        console.log(`[Autonomous] User became idle (idleTime: ${idleTime}s, threshold: ${this.config.idleThresholdMs / 1000}s)`);
+        this.lastIdleTime = idleTime;
+
+        console.log(`[Autonomous] User became idle (idleTime: ${idleTime}s)`);
 
         // デバッグイベント発行
         this.emit('debug', {
             type: 'idle_detected',
             idleTime,
-            threshold: this.config.idleThresholdMs / 1000,
             timestamp: Date.now(),
         });
 
-        // アイドル検知時に声掛け
+        // 長時間アイドルなら発話検討
         if (idleTime >= this.config.idleThresholdMs / 1000) {
-            this.scheduleAction('break_suggestion');
+            const context = this.buildContext('idle', { idleTimeSeconds: idleTime });
+            this.trySpeak(context);
         }
     }
 
@@ -129,7 +159,7 @@ export class AutonomousController extends EventEmitter {
         this.isUserActive = true;
 
         if (wasIdle) {
-            const idleTime = (event.data as any)?.idleTime || 0;
+            const idleTime = (event.data as any)?.idleTime || this.lastIdleTime;
             console.log(`[Autonomous] User returned after ${idleTime}s`);
 
             // デバッグイベント発行
@@ -140,9 +170,13 @@ export class AutonomousController extends EventEmitter {
                 timestamp: Date.now(),
             });
 
-            // 長時間離席後の復帰時に挨拶
+            // 長時間離席後の復帰
             if (idleTime > this.config.greetingIdleThresholdSeconds) {
-                this.scheduleAction('greeting');
+                const context = this.buildContext('active', {
+                    idleTimeSeconds: idleTime,
+                    note: `ユーザーが${Math.floor(idleTime / 60)}分ぶりに戻ってきた`
+                });
+                this.trySpeak(context);
             }
         }
     }
@@ -158,37 +192,125 @@ export class AutonomousController extends EventEmitter {
 
         // 作業時間チェック
         const workDuration = Date.now() - this.workStartTime;
+        const workMinutes = Math.floor(workDuration / 60000);
+
         if (workDuration >= this.config.workDurationMs) {
-            this.scheduleAction('break_suggestion');
+            const context = this.buildContext('timer', {
+                workDurationMinutes: workMinutes,
+                note: `ユーザーは${workMinutes}分間作業を続けている`
+            });
+            this.trySpeak(context);
         }
     }
 
     /**
-     * アクションをスケジュール
+     * 画面変更時の処理（外部から呼び出し可能）
      */
-    private scheduleAction(action: AutonomousActionType): void {
+    async handleScreenChange(screenInfo: { app?: string; title?: string; url?: string }): Promise<void> {
+        if (!this.config.enabled) return;
+        if (!this.canAct()) return;
+
+        const context = this.buildContext('screen_change', { screenInfo });
+        await this.trySpeak(context);
+    }
+
+    /**
+     * 状況コンテキストを構築
+     */
+    private buildContext(
+        trigger: SituationContext['trigger'],
+        extra?: Partial<SituationContext>
+    ): SituationContext {
+        const now = new Date();
+        const hour = now.getHours();
+
+        // 時間帯を判定
+        let timeOfDay: SituationContext['timeOfDay'];
+        if (hour >= 0 && hour < 5) {
+            timeOfDay = 'late_night';
+        } else if (hour >= 5 && hour < 8) {
+            timeOfDay = 'early_morning';
+        } else if (hour >= 8 && hour < 12) {
+            timeOfDay = 'morning';
+        } else if (hour >= 12 && hour < 17) {
+            timeOfDay = 'afternoon';
+        } else if (hour >= 17 && hour < 21) {
+            timeOfDay = 'evening';
+        } else {
+            timeOfDay = 'night';
+        }
+
+        // ユーザー状態
+        let userState: SituationContext['userState'] = this.isUserActive ? 'active' : 'idle';
+        if (trigger === 'active') {
+            userState = 'returned';
+        }
+
+        return {
+            currentTime: now.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }),
+            timeOfDay,
+            userState,
+            trigger,
+            workDurationMinutes: Math.floor((Date.now() - this.workStartTime) / 60000),
+            ...extra,
+        };
+    }
+
+    /**
+     * 発話を試みる
+     */
+    private async trySpeak(context: SituationContext): Promise<void> {
         if (!this.canAct()) {
-            console.log(`[Autonomous] Action "${action}" suppressed (rate limit)`);
+            console.log('[Autonomous] Speech suppressed (rate limit)');
             return;
         }
 
-        this.pendingAction = action;
-        this.executeAction(action);
+        const message = await this.generateMessage(context);
+        if (!message || message.trim() === '') {
+            console.log('[Autonomous] No message generated (AI decided not to speak)');
+            return;
+        }
+
+        // カウンタ更新
+        this.lastActionTime = Date.now();
+        this.dailyActionCount++;
+
+        // 作業提案後は作業時間リセット
+        if (context.trigger === 'timer') {
+            this.workStartTime = Date.now();
+        }
+
+        console.log(`[Autonomous] Speaking: ${message.substring(0, 50)}...`);
+
+        // イベントを発行（ローカルUI用）
+        this.emit('action', {
+            type: context.trigger,
+            message,
+            context,
+            timestamp: Date.now(),
+        });
+
+        // Discordにも送信
+        if (this.discordHandler) {
+            try {
+                await this.discordHandler(message);
+                console.log('[Autonomous] Message sent to Discord');
+            } catch (error) {
+                console.error('[Autonomous] Discord send failed:', error);
+            }
+        }
     }
 
     /**
      * アクション実行可能かチェック
      */
     private canAct(): boolean {
-        // 無効なら不可
         if (!this.config.enabled) return false;
 
-        // 1日の上限チェック
         if (this.dailyActionCount >= this.config.maxDailyActions) {
             return false;
         }
 
-        // 最小間隔チェック
         const elapsed = Date.now() - this.lastActionTime;
         if (elapsed < this.config.minIntervalMs) {
             return false;
@@ -198,116 +320,135 @@ export class AutonomousController extends EventEmitter {
     }
 
     /**
-     * アクションを実行
+     * メッセージを生成（システムプロンプト + 状況説明）
      */
-    private async executeAction(action: AutonomousActionType): Promise<void> {
-        const message = await this.generateMessage(action);
-        if (!message) return;
-
-        // カウンタ更新
-        this.lastActionTime = Date.now();
-        this.dailyActionCount++;
-
-        // 休憩提案後は作業時間リセット
-        if (action === 'break_suggestion') {
-            this.workStartTime = Date.now();
+    private async generateMessage(context: SituationContext): Promise<string | null> {
+        if (!this.llmHandler || !this.systemPrompt) {
+            console.log('[Autonomous] LLM handler or system prompt not set, using fallback');
+            return this.getFallbackMessage(context);
         }
 
-        console.log(`[Autonomous] Executing "${action}": ${message.substring(0, 50)}...`);
+        // 状況説明を構築
+        const situationMessage = this.buildSituationMessage(context);
 
-        // イベントを発行（ローカルUI用）
-        this.emit('action', {
-            type: action,
-            message,
-            timestamp: Date.now(),
-        });
+        try {
+            const response = await this.llmHandler(this.systemPrompt, situationMessage);
 
-        // Discordにも送信
-        if (this.discordHandler) {
-            try {
-                await this.discordHandler(message);
-                console.log(`[Autonomous] Message sent to Discord`);
-            } catch (error) {
-                console.error('[Autonomous] Discord send failed:', error);
+            // 「発言しない」という判断もありえる
+            if (this.shouldSkipResponse(response)) {
+                return null;
             }
-        }
 
-        this.pendingAction = null;
+            return response.trim();
+        } catch (error) {
+            console.error('[Autonomous] LLM generation failed:', error);
+            return this.getFallbackMessage(context);
+        }
     }
 
     /**
-     * メッセージを生成
+     * 状況説明メッセージを構築
      */
-    private async generateMessage(action: AutonomousActionType): Promise<string | null> {
-        const prompts: Record<AutonomousActionType, string> = {
-            break_suggestion: `ユーザーが長時間作業しています。休憩を提案する短いメッセージを生成してください。
-親しみやすく、押し付けがましくない口調で。50文字以内で。`,
-            
-            greeting: `ユーザーが戻ってきました。おかえりなさいの挨拶を生成してください。
-親しみやすい口調で。30文字以内で。`,
-            
-            encouragement: `ユーザーを励ます短いメッセージを生成してください。
-元気が出るような口調で。40文字以内で。`,
-            
-            reminder: `優しいリマインダーメッセージを生成してください。30文字以内で。`,
-            
-            weather_info: `天気に関する短い一言を生成してください。30文字以内で。`,
-            
-            tip: `プログラミングや生産性に関する豆知識を一つ教えてください。50文字以内で。`,
+    private buildSituationMessage(context: SituationContext): string {
+        const parts: string[] = [];
+
+        parts.push(`【現在の状況】`);
+        parts.push(`時刻: ${context.currentTime}`);
+
+        // 時間帯の説明
+        const timeDescriptions: Record<SituationContext['timeOfDay'], string> = {
+            late_night: '深夜',
+            early_morning: '早朝',
+            morning: '午前中',
+            afternoon: '午後',
+            evening: '夕方',
+            night: '夜',
         };
+        parts.push(`時間帯: ${timeDescriptions[context.timeOfDay]}`);
 
-        const prompt = prompts[action];
-        if (!prompt) return null;
-
-        // LLMがあれば使用
-        if (this.llmHandler) {
-            try {
-                return await this.llmHandler(prompt);
-            } catch (error) {
-                console.error('[Autonomous] LLM generation failed:', error);
-            }
+        // トリガーに応じた説明
+        switch (context.trigger) {
+            case 'idle':
+                parts.push(`状況: ユーザーが${context.idleTimeSeconds}秒間操作していない`);
+                break;
+            case 'active':
+                parts.push(`状況: ユーザーが戻ってきた`);
+                if (context.idleTimeSeconds) {
+                    const minutes = Math.floor(context.idleTimeSeconds / 60);
+                    parts.push(`離席時間: 約${minutes}分`);
+                }
+                break;
+            case 'timer':
+                parts.push(`状況: ユーザーは${context.workDurationMinutes}分間作業を続けている`);
+                break;
+            case 'screen_change':
+                if (context.screenInfo) {
+                    if (context.screenInfo.app) {
+                        parts.push(`ユーザーが開いているアプリ: ${context.screenInfo.app}`);
+                    }
+                    if (context.screenInfo.title) {
+                        parts.push(`ウィンドウタイトル: ${context.screenInfo.title}`);
+                    }
+                }
+                break;
         }
 
-        // フォールバック：定型文
-        return this.getFallbackMessage(action);
+        if (context.note) {
+            parts.push(`補足: ${context.note}`);
+        }
+
+        parts.push('');
+        parts.push('この状況であなたが言いたいことを短く（30文字以内）言ってください。');
+        parts.push('何も言いたくなければ「（黙る）」と答えてください。');
+
+        return parts.join('\n');
+    }
+
+    /**
+     * 発言をスキップすべきレスポンスか判定
+     */
+    private shouldSkipResponse(response: string): boolean {
+        const skipPatterns = [
+            '（黙る）',
+            '(黙る)',
+            '黙る',
+            '...',
+            '……',
+            '',
+        ];
+
+        const trimmed = response.trim();
+        return skipPatterns.some(pattern => trimmed === pattern || trimmed.startsWith(pattern));
     }
 
     /**
      * フォールバックメッセージ
      */
-    private getFallbackMessage(action: AutonomousActionType): string {
-        const messages: Record<AutonomousActionType, string[]> = {
-            break_suggestion: [
-                'そろそろ休憩しませんか？',
-                '少し休憩を取りましょう！',
-                '目を休める時間ですよ',
-                'ストレッチはいかがですか？',
+    private getFallbackMessage(context: SituationContext): string {
+        const messages: Record<SituationContext['trigger'], string[]> = {
+            idle: [
+                'ちょっと休憩したら？',
+                'まだいる？',
+                '……暇',
             ],
-            greeting: [
-                'おかえりなさい！',
-                'お戻りですね！',
-                'また会えて嬉しいです',
+            active: [
+                'おかえり',
+                'あ、戻ってきた',
+                'やっと戻ってきたね',
             ],
-            encouragement: [
-                '頑張ってますね！',
-                'いい調子です！',
-                '素敵な作業ぶりです',
+            timer: [
+                '長くない？休憩しなよ',
+                'ずっと作業してるね',
+                '目、疲れてない？',
             ],
-            reminder: [
-                '忘れていることはありませんか？',
-                '何かお手伝いできることはありますか？',
-            ],
-            weather_info: [
-                '今日もいい天気ですね',
-                '体調に気をつけてくださいね',
-            ],
-            tip: [
-                '小さな一歩が大きな成果につながります',
-                '整理整頓は生産性の基本です',
+            screen_change: [
+                'へー、何見てるの？',
+                'ふーん',
+                '面白そう',
             ],
         };
 
-        const options = messages[action] || ['こんにちは'];
+        const options = messages[context.trigger] || ['……'];
         return options[Math.floor(Math.random() * options.length)];
     }
 

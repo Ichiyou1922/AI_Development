@@ -1088,12 +1088,17 @@ app.whenReady().then(async () => {
     // 自律行動コントローラの初期化
     // ============================================================
 
-    // LLMハンドラを設定
-    autonomousController.setLLMHandler(async (prompt: string) => {
+    // システムプロンプトを設定
+    autonomousController.setSystemPrompt(config.prompts.system);
+
+    // LLMハンドラを設定（新形式：システムプロンプト + ユーザーメッセージ）
+    autonomousController.setLLMHandler(async (systemPrompt: string, userMessage: string) => {
         return new Promise((resolve, reject) => {
             let response = '';
             llmRouter.sendMessageStream(
-                [{ role: 'user', content: prompt }],
+                [
+                    { role: 'user', content: `${systemPrompt}\n\n${userMessage}` }
+                ],
                 {
                     onToken: (token) => { response += token; },
                     onDone: () => resolve(response),
