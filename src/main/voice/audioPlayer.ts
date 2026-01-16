@@ -20,6 +20,9 @@ export class AudioPlayer extends EventEmitter {
     /**
      * WAVバッファを再生
      */
+    /**
+     * WAVバッファを再生
+     */
     async play(wavBuffer: Buffer): Promise<void> {
         if (this.state === 'playing') {
             this.stop();

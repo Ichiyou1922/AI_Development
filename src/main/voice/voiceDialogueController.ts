@@ -69,7 +69,10 @@ export class VoiceDialogueController extends EventEmitter {
         // マイク状態変更
         this.micCapture.on('stateChange', (captureState: string) => {
             if (captureState === 'recording') {
-                this.setState('recording');
+                // 発話中は録音状態に遷移させない
+                if (this.state !== 'speaking') {
+                    this.setState('recording');
+                }
             } else if (captureState === 'listening' && this.state === 'recording') {
                 this.setState('transcribing');
             }
@@ -141,6 +144,12 @@ export class VoiceDialogueController extends EventEmitter {
     private async handleAudioCapture(audioBuffer: Buffer): Promise<void> {
         if (!this.isActive) return;
 
+        // 発話中の音声入力は無視（エコーバック防止）
+        if (this.state === 'speaking') {
+            console.log('[VoiceDialogue] Ignored audio input during speaking');
+            return;
+        }
+
         try {
             this.setState('transcribing');
 
@@ -206,11 +215,16 @@ export class VoiceDialogueController extends EventEmitter {
             return;
         }
 
-        if (this.autoListen) {
-            this.resumeListening();
-        } else {
-            this.setState('idle');
-        }
+        // 残響対策：少し待ってからリスニング再開
+        setTimeout(() => {
+            if (!this.isActive) return;
+
+            if (this.autoListen) {
+                this.resumeListening();
+            } else {
+                this.setState('idle');
+            }
+        }, 2000); // 5秒待機 もっと長くしないとだめか
     }
 
     /**

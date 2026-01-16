@@ -13,10 +13,10 @@ interface IdleConfig {
  */
 export class IdleDetector {
     private config: IdleConfig = {
-        idleThresholdSeconds: 300,  // 5分
-        checkIntervalMs: 30000,     // 30秒ごとにチェック
+        idleThresholdSeconds: 60,  // 1分
+        checkIntervalMs: 60000,     // 1分ごとにチェック
     };
-    
+
     private checkInterval: NodeJS.Timeout | null = null;
     private isIdle: boolean = false;
     private lastIdleTime: number = 0;
@@ -28,14 +28,14 @@ export class IdleDetector {
         if (config) {
             this.config = { ...this.config, ...config };
         }
-        
+
         // 既存のインターバルをクリア
         this.stop();
-        
+
         this.checkInterval = setInterval(() => {
             this.checkIdleState();
         }, this.config.checkIntervalMs);
-        
+
         console.log(`[IdleDetector] Started (threshold: ${this.config.idleThresholdSeconds}s)`);
     }
 
@@ -56,12 +56,12 @@ export class IdleDetector {
      */
     private checkIdleState(): void {
         const idleTime = powerMonitor.getSystemIdleTime();
-        
+
         if (idleTime >= this.config.idleThresholdSeconds && !this.isIdle) {
             // アイドル状態に移行
             this.isIdle = true;
             this.lastIdleTime = idleTime;
-            
+
             const event: SystemEvent = {
                 type: 'system:idle',
                 priority: EventPriority.LOW,
@@ -71,13 +71,13 @@ export class IdleDetector {
                 },
             };
             eventBus.publish(event);
-            
+
             console.log(`[IdleDetector] User is idle (${idleTime}s)`);
-            
+
         } else if (idleTime < this.config.idleThresholdSeconds && this.isIdle) {
             // アクティブ状態に復帰
             this.isIdle = false;
-            
+
             const event: SystemEvent = {
                 type: 'system:active',
                 priority: EventPriority.NORMAL,
@@ -87,7 +87,7 @@ export class IdleDetector {
                 },
             };
             eventBus.publish(event);
-            
+
             console.log(`[IdleDetector] User is active again`);
         }
     }

@@ -40,6 +40,8 @@ export interface CaptureConfig {
     silenceThreshold: number;   // 無音判定の閾値（0.0 ~ 1.0）
     silenceDuration: number;    // 無音継続時間（ms）で録音停止
     maxRecordingTime: number;   // 最大録音時間（ms）
+    intermediateSilenceDuration?: number; // 分割用：短い無音判定（ms）
+    minChunkLength?: number;              // 分割用：最小チャンク長（ms）
 }
 
 /**

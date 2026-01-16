@@ -134,6 +134,16 @@ export class MicrophoneCapture extends EventEmitter {
         const audioBuffer = Buffer.concat(this.audioChunks);
         const duration = (Date.now() - this.recordingStart) / 1000;
 
+        // 1秒未満の録音はノイズとして無視（ただしバッファがある程度あれば送る）
+        if (duration < 1.0 && audioBuffer.length < 16000 * 2) {
+            console.log(`[MicrophoneCapture] Ignored short recording: ${duration.toFixed(2)}s`);
+            this.state = 'listening';
+            this.audioChunks = [];
+            this.silenceStart = 0;
+            this.emit('stateChange', this.state);
+            return;
+        }
+
         console.log(`[MicrophoneCapture] Recording finished: ${duration.toFixed(2)}s, ${audioBuffer.length} bytes`);
 
         this.state = 'processing';

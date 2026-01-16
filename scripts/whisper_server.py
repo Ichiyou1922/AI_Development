@@ -90,8 +90,8 @@ class TranscribeHandler(BaseHTTPRequestHandler):
                 segments, info = model.transcribe(
                     tmp_path,
                     language="ja",
-                    beam_size=5,
-                    best_of=5,
+                    beam_size=5, # 精度が悪ければ5にする
+                    best_of=5, # 精度が悪ければ5にする
                     vad_filter=True,
                     vad_parameters=dict(
                         min_silence_duration_ms=1000,

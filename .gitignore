@@ -19,3 +19,4 @@ node_modules
 src/renderer/assets/Hiyori/
 src/renderer/lib/
 .venv
+scripts/__pycache__

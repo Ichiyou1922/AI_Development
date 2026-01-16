@@ -33,7 +33,7 @@ export class VoicevoxProvider implements TTSProvider {
     private speakerId: number;
     private ready: boolean = false;
 
-    constructor(baseUrl: string = 'http://localhost:50021', speakerId: number = 1) {
+    constructor(baseUrl: string = 'http://localhost:50021', speakerId: number = 14) {
         this.baseUrl = baseUrl;
         this.speakerId = speakerId;
     }
@@ -80,6 +80,9 @@ export class VoicevoxProvider implements TTSProvider {
         }
 
         const audioQuery: AudioQuery = await queryResponse.json();
+
+        // 読み上げ速度を上げる
+        audioQuery.speedScale = 1.3;
 
         // Step 2: 音声合成
         const synthesisResponse = await fetch(

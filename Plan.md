@@ -14,3 +14,17 @@
 - [ ] ハードコード解消->設定ファイルで管理する
 - [ ] フィードバックループの実装->ユーザーの反応から学習，倫理感を考慮する
 
+dockerでVOICEVOX Engineをダウンロード
+```bash
+docker run --rm --gpus all -p 50021:50021 voicevox/voicevox_engine:nvidia-ubuntu20.04-latest
+```
+
+voicevox重いのでCPU版を使おう
+```bash
+docker run --rm -p 50021:50021 voicevox/voicevox_engine:cpu-ubuntu20.04-latest
+```
+
+GPU版はこっち
+```bash
+docker run --rm --gpus all -p 50021:50021 voicevox/voicevox_engine:nvidia-ubuntu20.04-latest
+```

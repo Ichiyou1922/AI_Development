@@ -917,7 +917,7 @@ app.whenReady().then(async () => {
     }
 
     try {
-        voicevoxProvider = new VoicevoxProvider('http://localhost:50021', 1);
+        voicevoxProvider = new VoicevoxProvider('http://localhost:50021');
         await voicevoxProvider.initialize();
 
         audioPlayer = new AudioPlayer();
