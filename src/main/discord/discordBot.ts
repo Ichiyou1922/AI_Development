@@ -92,6 +92,33 @@ export class DiscordBot extends EventEmitter {
             return;
         }
 
+        // コマンド処理: !join
+        if (message.content === '!join') {
+            if (message.member?.voice.channel && message.guildId) {
+                try {
+                    await this.joinVoiceChannel(message.member.voice.channel.id, message.guildId);
+                    await message.reply('音声チャンネルに参加しました。');
+                } catch (error) {
+                    console.error('[DiscordBot] Join error:', error);
+                    await message.reply('参加できませんでした。権限などを確認してください。');
+                }
+            } else {
+                await message.reply('先に音声チャンネルに参加してください。');
+            }
+            return;
+        }
+
+        // コマンド処理: !leave
+        if (message.content === '!leave') {
+            if (this.isVoiceConnected()) {
+                this.leaveVoiceChannel();
+                await message.reply('音声チャンネルから退出しました。');
+            } else {
+                await message.reply('音声チャンネルに参加していません。');
+            }
+            return;
+        }
+
         // メンションまたはプレフィックスで始まるメッセージのみ応答
         const isMentioned = message.mentions.has(this.client.user!);
         const hasPrefix = this.config.prefix &&
