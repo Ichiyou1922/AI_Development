@@ -110,20 +110,22 @@ class TranscribeHandler(BaseHTTPRequestHandler):
                 
                 text = "".join(text_parts).strip()
 
-                # Filter common hallucinations
-                hallucinations = [
-                    "ご視聴ありがとうございました",
-                    "チャンネル登録",
-                    "高評価",
-                    "Subtitles by",
-                    "Amara.org"
-                ]
                 
-                for h in hallucinations:
-                    if h in text:
-                        text = ""
-                        break
-
+                
+                # Filter common hallucinations
+                #hallucinations = [
+                #    "ご視聴ありがとうございました",
+                #    "チャンネル登録",
+                #    "高評価",
+                #    "Subtitles by",
+                #    "Amara.org"
+                #]
+                
+                #for h in hallucinations:
+                #    if h in text:
+                #        text = ""
+                #        break
+                
                 result = {
                     "success": True,
                     "text": text,

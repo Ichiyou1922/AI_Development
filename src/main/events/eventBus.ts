@@ -64,12 +64,12 @@ export class EventBus extends EventEmitter {
         if (!event.timestamp) {
             event.timestamp = Date.now();
         }
-        
+
+        console.log(`[EventBus] Publishing event: ${event.type}`, event.data);
+
         // 優先度でキューに挿入
         this.insertByPriority(event);
-        
-        console.log(`[EventBus] Event published: ${event.type} (priority: ${event.priority})`);
-        
+
         // 処理を開始
         this.processQueue();
     }
@@ -120,12 +120,14 @@ export class EventBus extends EventEmitter {
         const typeHandlers = this.handlers.get(event.type) || [];
         // ワイルドカードハンドラ
         const wildcardHandlers = this.handlers.get('*') || [];
-        
+
         const allHandlers = [...typeHandlers, ...wildcardHandlers];
-        
+
+        console.log(`[EventBus] Dispatching "${event.type}" to ${allHandlers.length} handlers`);
+
         // 優先度でソート
         allHandlers.sort((a, b) => b.priority - a.priority);
-        
+
         for (const registration of allHandlers) {
             try {
                 await registration.handler(event);
@@ -134,7 +136,7 @@ export class EventBus extends EventEmitter {
                 this.emit('error', { event, error });
             }
         }
-        
+
         // EventEmitterにも通知
         this.emit(event.type, event);
         this.emit('event', event);

@@ -382,6 +382,13 @@ export class DiscordBot extends EventEmitter {
     }
 
     /**
+     * 音声再生中かどうか
+     */
+    isSpeaking(): boolean {
+        return this.voice?.isPlaybackActive() ?? false;
+    }
+
+    /**
      * 自律発話をDiscordに送信
      * テキストチャンネルへの送信 + 音声チャンネルでのTTS再生
      * @param message 送信するメッセージ

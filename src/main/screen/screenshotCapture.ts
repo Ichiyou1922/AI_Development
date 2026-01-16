@@ -70,8 +70,6 @@ export class ScreenshotCapture extends EventEmitter {
 
             // JPEG形式でバッファに変換
             const buffer = thumbnail.toJPEG(this.config.quality);
-
-            console.log(`[ScreenshotCapture] Captured ${buffer.length} bytes`);
             return buffer;
         } catch (error) {
             console.error('[ScreenshotCapture] Capture failed:', error);

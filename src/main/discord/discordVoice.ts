@@ -38,6 +38,9 @@ export class DiscordVoice extends EventEmitter {
     private userSilenceTimers: Map<string, NodeJS.Timeout> = new Map();
     private userSpeakingStart: Map<string, number> = new Map();
 
+    // TTS再生中フラグ（再生中は音声受信を無視）
+    private isSpeaking: boolean = false;
+
     // 設定（調整済み）
     private silenceDuration: number = 2000;      // 無音判定時間（ms）: 1500 → 2000
     private minAudioDurationMs: number = 500;    // 最小音声長（ms）: 追加
@@ -146,6 +149,11 @@ export class DiscordVoice extends EventEmitter {
 
         // 話し始めを検出
         receiver.speaking.on('start', (userId) => {
+            // TTS再生中は音声受信を無視（エコーバック防止）
+            if (this.isSpeaking) {
+                console.log(`[DiscordVoice] Ignored speaking start from ${userId} (TTS playing)`);
+                return;
+            }
             console.log(`[DiscordVoice] User ${userId} started speaking`);
             this.handleUserSpeakingStart(userId, receiver);
         });
@@ -253,6 +261,15 @@ export class DiscordVoice extends EventEmitter {
      * ユーザーの音声データをフラッシュ
      */
     private async flushUserAudio(userId: string): Promise<void> {
+        // TTS再生中は処理しない
+        if (this.isSpeaking) {
+            console.log(`[DiscordVoice] Ignored flush for user ${userId} (TTS playing)`);
+            this.userAudioBuffers.delete(userId);
+            this.userSpeakingStart.delete(userId);
+            this.userSilenceTimers.delete(userId);
+            return;
+        }
+
         const buffers = this.userAudioBuffers.get(userId);
         const startTime = this.userSpeakingStart.get(userId);
 
@@ -268,8 +285,6 @@ export class DiscordVoice extends EventEmitter {
         // バッファを結合
         const audioBuffer = Buffer.concat(buffers);
         const durationMs = startTime ? Date.now() - startTime : 0;
-
-        console.log(`[DiscordVoice] Raw audio from user ${userId}: ${audioBuffer.length} bytes, ${buffers.length} chunks, ~${durationMs}ms`);
 
         // 最小長チェック（生データで判定）
         // Discord: 48kHz, stereo, 16bit = 4 bytes per sample
@@ -362,6 +377,13 @@ export class DiscordVoice extends EventEmitter {
             return;
         }
 
+        // 再生中フラグをON（音声受信を一時停止）
+        this.isSpeaking = true;
+        console.log('[DiscordVoice] TTS playback started, receiving paused');
+
+        // 既存のバッファをクリア（再生開始前に溜まった音声を破棄）
+        this.clearAllBuffers();
+
         // WAVファイルを一時保存
         const tempFile = path.join(os.tmpdir(), `discord_tts_${Date.now()}.wav`);
 
@@ -379,6 +401,10 @@ export class DiscordVoice extends EventEmitter {
                     resolve();
                 });
             });
+
+            // 再生終了後、少し待ってからリスニング再開（エコー防止）
+            await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+
         } finally {
             // 一時ファイル削除
             try {
@@ -386,7 +412,24 @@ export class DiscordVoice extends EventEmitter {
             } catch {
                 // 無視
             }
+
+            // 再生中フラグをOFF
+            this.isSpeaking = false;
+            console.log('[DiscordVoice] TTS playback ended, receiving resumed');
         }
+    }
+
+    /**
+     * すべてのユーザーのバッファをクリア
+     */
+    private clearAllBuffers(): void {
+        for (const timer of this.userSilenceTimers.values()) {
+            clearTimeout(timer);
+        }
+        this.userAudioBuffers.clear();
+        this.userSpeakingStart.clear();
+        this.userSilenceTimers.clear();
+        console.log('[DiscordVoice] All audio buffers cleared');
     }
 
     /**
@@ -433,6 +476,13 @@ export class DiscordVoice extends EventEmitter {
      */
     getCurrentChannelId(): string | null {
         return this.currentChannelId;
+    }
+
+    /**
+     * TTS再生中かどうか
+     */
+    isPlaybackActive(): boolean {
+        return this.isSpeaking;
     }
 
     /**

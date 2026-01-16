@@ -211,11 +211,6 @@ async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string
     systemPromptParts.push(`\n\n【現在の発言者】\n${ctx.userContext}`);
     systemPromptParts.push(`この人の名前は「${speakerName}」です。名前を呼んで話しかけてください。`);
 
-    // 記憶コンテキストがあれば追加
-    if (memoryContext) {
-        systemPromptParts.push(`\n\n【関連する記憶】\n${memoryContext}`);
-    }
-
     const fullSystemPrompt = systemPromptParts.join('');
 
     // 会話履歴をLLMメッセージ形式に変換（システムプロンプトを先頭に）
@@ -326,6 +321,7 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
     // 発言者情報を追加
     systemPromptParts.push(`\n\n【現在の発言者】\n${userContext}`);
     systemPromptParts.push(`この人の名前は「${speakerName}」です。名前を呼んで話しかけてください。`);
+    systemPromptParts.push(`\n【重要】\n相手の名前がわからない場合でも、「〇〇さん」や「ユーザーさん」といったプレースホルダーは絶対に使わないでください。その場合は「あなた」と呼ぶか、名前を呼ばずに話しかけてください。`);
 
     // 記憶コンテキストがあれば追加
     if (memoryContext) {
@@ -941,7 +937,7 @@ app.whenReady().then(async () => {
 
     // LLMルーター初期化（設定を使用）
     llmRouter = new LLMRouter(config.llm);
-    console.log(`[App] LLM Router initialized (preference: ${config.llm.preference})`);
+    console.log(`[App] LLM Router initialized(preference: ${config.llm.preference})`);
 
     // 会話ストレージ初期化
     conversationStorage = new ConversationStorage();
@@ -993,14 +989,12 @@ app.whenReady().then(async () => {
         // 音声認識開始
         microphoneCapture.on('audioCapture', async (audioBuffer: Buffer) => {
             try {
-                console.log(`[Voice] Processing audio: ${audioBuffer.length} bytes`);
                 const result = await sttRouter.transcribe(audioBuffer, 16000);
-                console.log(`[Voice] Transcription: ${result.text}`);
 
                 // Rendererに音声認識結果を送信
                 mainWindow?.webContents.send('voice-transcription', { text: result.text });
             } catch (error) {
-                console.error(`[Voice] Transcription failed: ${error}`);
+                console.error(`[Voice] Transcription failed: ${error} `);
                 mainWindow?.webContents.send('voice-error', { error: String(error) });
             }
         });
@@ -1029,9 +1023,9 @@ app.whenReady().then(async () => {
         });
 
         ttsEnabled = true;
-        console.log('[APP] TTS system initialized');
+        console.log('[App] TTS system initialized');
     } catch (error) {
-        console.log('[APP] TTS system not available:', error);
+        console.log('[App] TTS system not available:', error);
         ttsEnabled = false;
     }
 
@@ -1066,7 +1060,7 @@ app.whenReady().then(async () => {
             mainWindow?.webContents.send('dialogue-error', { error });
         });
 
-        console.log('[APP] Voice dialogue controller initialized');
+        console.log('[App] Voice dialogue controller initialized');
     }
 
     // Discord Botの初期化
@@ -1160,7 +1154,7 @@ app.whenReady().then(async () => {
 
     // イベントハンドラの登録（全イベントをログ）
     eventBus.register('*', (event: AgentEvent) => {
-        console.log(`[Event] ${event.type}:`, event.data);
+        console.log(`[Event] ${event.type}: `, event.data);
     }, EventPriority.LOW);
 
     // アイドル検出の開始
@@ -1200,7 +1194,7 @@ app.whenReady().then(async () => {
             let response = '';
             llmRouter.sendMessageStream(
                 [
-                    { role: 'user', content: `${systemPrompt}\n\n${userMessage}` }
+                    { role: 'user', content: `${systemPrompt} \n\n${userMessage} ` }
                 ],
                 {
                     onToken: (token) => { response += token; },
@@ -1209,6 +1203,21 @@ app.whenReady().then(async () => {
                 }
             );
         });
+    });
+
+    // 発話状態チェッカーを設定
+    autonomousController.setIsSpeakingChecker(() => {
+        // ローカルでの発話チェック
+        if (typeof voiceDialogue !== 'undefined' && voiceDialogue && voiceDialogue.getState() === 'speaking') {
+            return true;
+        }
+
+        // Discordでの発話チェック
+        if (discordBot && discordBot.isSpeaking()) {
+            return true;
+        }
+
+        return false;
     });
 
     // 自律行動イベントをRendererに転送
@@ -1323,7 +1332,7 @@ app.whenReady().then(async () => {
     try {
         sttRouter = new STTRouter('faster-whisper');
         await sttRouter.initialize();
-        console.log(`[App] ATT initialized: ${sttRouter.getActiveProvider()}`);
+        console.log(`[App] ATT initialized: ${sttRouter.getActiveProvider()} `);
     } catch (error) {
         console.error('[App] ATT initialization failed:', error);
     }
@@ -1346,20 +1355,35 @@ app.whenReady().then(async () => {
         alwaysOnListener.setLLMHandler(async (text, UserContextMenuCommandInteraction, username) => {
             // 会話履歴に追加
             if (!activeConversationId) {
-                const conv = await conversationStorage.create(`Discord: ${username}`);
+                const conv = await conversationStorage.create(`Discord: ${username} `);
                 activeConversationId = conv.id;
             }
 
-            const messageWithSpeaker = `[${username}]: ${text}`;
+            const messageWithSpeaker = `[${username}]: ${text} `;
             await conversationStorage.addMessage(activeConversationId, 'user', messageWithSpeaker);
 
             // 記憶検索+LLM呼び出し
             const context = await memoryManager.buildContextForPrompt(text);
             const conversation = await conversationStorage.load(activeConversationId);
-            const history = conversation!.messages.map(m => ({
+            const history: LLMMessage[] = conversation!.messages.map(m => ({
                 role: m.role,
                 content: m.content,
             }));
+
+            // システムプロンプトに発言者情報を追加
+            const systemPrompt = config.prompts.system + `
+【現在の対話相手】
+名前: ${username}
+この人の名前は「${username}」です。名前を呼んで親しく話しかけてください。
+
+【重要】
+相手の名前がわからない場合でも、「〇〇さん」や「ゼロゼロさん」といったプレースホルダーは絶対に使わないでください。
+その場合は「あなた」と呼ぶか、名前を呼ばずに話しかけてください。
+固有名詞が不明な場合も「〇〇」と表現せず、「それ」や「あれ」などの代名詞を使ってください。`;
+
+            // 履歴の先頭にシステムプロンプトを追加
+            history.unshift({ role: 'user', content: systemPrompt });
+            history.unshift({ role: 'assistant', content: 'わかりました。' });
 
             let response = '';
             await new Promise<void>((resolve, reject) => {

@@ -167,14 +167,31 @@ function updateEmotionSymbol(emotion: EmotionType): void {
     }
 }
 
-function setEmotion(emotion: EmotionType): void {
-    if (currentEmotion === emotion) return;
-    console.log(`[Live2D] Emotion: ${currentEmotion} -> ${emotion}`);
-    currentEmotion = emotion;
-    targetParams = { ...EMOTION_PRESETS[emotion] };
+let expressionTimer: number | null = null;
 
-    // Update symbol
-    updateEmotionSymbol(emotion);
+function setEmotion(emotion: EmotionType): void {
+    // タイマーがあればキャンセル（新しい感情で上書き、または同じ感情での延長）
+    if (expressionTimer !== null) {
+        clearTimeout(expressionTimer);
+        expressionTimer = null;
+    }
+
+    // 状態が同じでもタイマー延長のためにここを通るが、DOM更新とパラメータ設定は変更時のみにする
+    if (currentEmotion !== emotion) {
+        console.log(`[Live2D] Emotion: ${currentEmotion} -> ${emotion}`);
+        currentEmotion = emotion;
+        targetParams = { ...EMOTION_PRESETS[emotion] };
+
+        // Update symbol
+        updateEmotionSymbol(emotion);
+    }
+
+    // neutral以外なら一定時間後にneutralに戻す
+    if (emotion !== 'neutral') {
+        expressionTimer = window.setTimeout(() => {
+            setEmotion('neutral');
+        }, 5000); // 5秒後に戻す
+    }
 }
 
 function updateExpression(): void {
@@ -194,21 +211,58 @@ function updateExpression(): void {
 }
 
 function detectEmotionFromText(text: string): EmotionType {
-    if (/[😊😄🎉]|嬉しい|楽しい|ありがとう|素晴らしい|良い|いいね|わーい|やった/.test(text)) {
-        return 'happy';
+    // 1. 絵文字による優先判定
+    // テキスト内の絵文字をすべて検索し、最後に出現したものを優先する
+
+    const emojiMap: { [key: string]: EmotionType } = {
+        '😠': 'angry', '😤': 'angry', '😡': 'angry', '🤬': 'angry', '🤯': 'angry', '💢': 'angry',
+        '😢': 'sad', '😭': 'sad', '😥': 'sad', '😓': 'sad', '😞': 'sad', '😖': 'sad', '😣': 'sad', '😩': 'sad', '😫': 'sad', '😿': 'sad', '💔': 'sad', '💧': 'sad',
+        '😲': 'surprised', '😮': 'surprised', '😯': 'surprised', '😦': 'surprised', '😧': 'surprised', '😨': 'surprised', '😱': 'surprised',
+        '😊': 'happy', '😄': 'happy', '😃': 'happy', '😀': 'happy', '😁': 'happy', '😆': 'happy', '🤣': 'happy', '😂': 'happy', '🥰': 'happy', '😍': 'happy', '🤩': 'happy', '🥳': 'happy', '🤗': 'happy', '😻': 'happy', '🎉': 'happy', '✨': 'happy', '❤️': 'happy', '♥️': 'happy', '👍': 'happy',
+        '🤔': 'thinking', '🤨': 'thinking', '🧐': 'thinking'
+    };
+
+    let lastIndex = -1;
+    let detectedEmotion: EmotionType = 'neutral';
+    let matchedEmoji = '';
+
+    for (const [emoji, emotion] of Object.entries(emojiMap)) {
+        const index = text.lastIndexOf(emoji);
+        if (index > lastIndex) {
+            lastIndex = index;
+            detectedEmotion = emotion;
+            matchedEmoji = emoji;
+        }
     }
-    if (/[😢😭]|悲しい|残念|辛い|寂しい|ごめん/.test(text)) {
-        return 'sad';
+
+    if (detectedEmotion !== 'neutral') {
+        console.log(`[Live2D] Emotion detected: ${detectedEmotion} (emoji: ${matchedEmoji})`);
+        return detectedEmotion;
     }
-    if (/[😠😤]|怒|ムカ|イライラ|許せない/.test(text)) {
+
+    // 2. テキストキーワードによる判定（補助）
+
+    // 怒り
+    if (/怒(る|り)|ムカ|イライラ|許せない|ふざけるな/.test(text)) {
         return 'angry';
     }
-    if (/[😲😮]|驚|びっくり|まさか|えっ|本当/.test(text)) {
+    // 悲しみ
+    if (/悲しい|残念|辛い|寂しい|泣(く|き)|ごめん(なさい)?/.test(text)) {
+        return 'sad';
+    }
+    // 驚き
+    if (/驚(く|き)|びっくり|まさか|えっ[!！?？]|本当(に|ですか)|嘘(でしょう|でしょ)/.test(text)) {
         return 'surprised';
     }
-    if (/[🤔]|考え|思う|かな|だろう|でしょう|\.\.\./.test(text)) {
+    // 喜び
+    if (/嬉(しい|し)|楽(しい|し)|ありがとう|素晴らしい|最高|やった(ー|！)|わーい/.test(text)) {
+        return 'happy';
+    }
+    // 思考
+    if (/考え(て|る)|思(う|って)|かな(\.\.|…)|だろうか|でしょう(か)?|\.\.\.|…|\?|？/.test(text)) {
         return 'thinking';
     }
+
     return 'neutral';
 }
 

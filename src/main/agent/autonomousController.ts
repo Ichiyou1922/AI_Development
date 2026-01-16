@@ -60,6 +60,16 @@ export class AutonomousController extends EventEmitter {
     // Discordハンドラ（外部から注入）
     private discordHandler: ((message: string, options?: { channelId?: string }) => Promise<void>) | null = null;
 
+    // 発話状態チェッカー（外部から注入）
+    private isSpeakingChecker: (() => boolean) | null = null;
+
+    /**
+     * 発話状態チェッカーを設定
+     */
+    setIsSpeakingChecker(checker: () => boolean): void {
+        this.isSpeakingChecker = checker;
+    }
+
     constructor() {
         super();
         this.setupEventListeners();
@@ -260,8 +270,11 @@ export class AutonomousController extends EventEmitter {
      * 発話を試みる
      */
     private async trySpeak(context: SituationContext): Promise<void> {
+        console.log(`[Autonomous] trySpeak called with trigger: ${context.trigger}`);
+
         if (!this.canAct()) {
-            console.log('[Autonomous] Speech suppressed (rate limit)');
+            const elapsed = Date.now() - this.lastActionTime;
+            console.log(`[Autonomous] Speech suppressed (rate limit). Elapsed: ${elapsed}ms, Required: ${this.config.minIntervalMs}ms, DailyCount: ${this.dailyActionCount}/${this.config.maxDailyActions}`);
             return;
         }
 
@@ -282,6 +295,7 @@ export class AutonomousController extends EventEmitter {
 
         console.log(`[Autonomous] Speaking: ${message.substring(0, 50)}...`);
 
+        /** 
         // イベントを発行（ローカルUI用）
         this.emit('action', {
             type: context.trigger,
@@ -289,6 +303,8 @@ export class AutonomousController extends EventEmitter {
             context,
             timestamp: Date.now(),
         });
+        **/
+
 
         // Discordにも送信
         if (this.discordHandler) {
@@ -299,6 +315,7 @@ export class AutonomousController extends EventEmitter {
                 console.error('[Autonomous] Discord send failed:', error);
             }
         }
+
     }
 
     /**
@@ -306,6 +323,11 @@ export class AutonomousController extends EventEmitter {
      */
     private canAct(): boolean {
         if (!this.config.enabled) return false;
+
+        // AIが喋っている場合はアクションしない
+        if (this.isSpeakingChecker && this.isSpeakingChecker()) {
+            return false;
+        }
 
         if (this.dailyActionCount >= this.config.maxDailyActions) {
             return false;
@@ -333,9 +355,11 @@ export class AutonomousController extends EventEmitter {
 
         try {
             const response = await this.llmHandler(this.systemPrompt, situationMessage);
+            console.log(`[Autonomous] LLM response: "${response}"`);
 
             // 「発言しない」という判断もありえる
             if (this.shouldSkipResponse(response)) {
+                console.log(`[Autonomous] Response skipped (matched skip pattern)`);
                 return null;
             }
 
@@ -406,9 +430,13 @@ export class AutonomousController extends EventEmitter {
 
     /**
      * 発言をスキップすべきレスポンスか判定
+     * 完全一致のみでスキップ（「……暇」などの返答は許可）
      */
     private shouldSkipResponse(response: string): boolean {
-        const skipPatterns = [
+        const trimmed = response.trim();
+
+        // 完全一致でスキップするパターン
+        const exactSkipPatterns = [
             '（黙る）',
             '(黙る)',
             '黙る',
@@ -417,8 +445,7 @@ export class AutonomousController extends EventEmitter {
             '',
         ];
 
-        const trimmed = response.trim();
-        return skipPatterns.some(pattern => trimmed === pattern || trimmed.startsWith(pattern));
+        return exactSkipPatterns.includes(trimmed);
     }
 
     /**
