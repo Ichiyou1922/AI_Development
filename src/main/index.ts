@@ -16,6 +16,7 @@ import { CaptureState } from './voice/types.js';
 import { VoicevoxProvider } from './voice/voicevoxProvider.js';
 import { AudioPlayer } from './voice/audioPlayer.js';
 import { VoiceDialogueController, DialogueState } from './voice/voiceDialogueController.js';
+import { StreamingTTSController } from './voice/streamingTTSController.js';
 import { DiscordBot, DiscordMessageContext, IdentifiedAudio } from './discord/index.js';
 import { MascotWindow } from './windows/MascotWindow.js';
 import {
@@ -40,10 +41,11 @@ let voiceEnabled: boolean = false;
 let voicevoxProvider: VoicevoxProvider;
 let audioPlayer: AudioPlayer;
 let ttsEnabled: boolean = false;
-let voiceDialogue: VoiceDialogueController;
+let voiceDialogue: VoiceDialogueController | null = null as VoiceDialogueController | null;
 let discordBot: DiscordBot | null = null;
 let sttRouter: STTRouter;
 let alwaysOnListener: AlwaysOnListener | null = null;
+let discordStreamingTTS: StreamingTTSController | null = null;
 
 // app.isQuittingはelectronTypes.d.tsで定義
 
@@ -122,14 +124,12 @@ async function processVoiceMessage(userText: string): Promise<string> {
         content: m.content,
     }));
 
-    // LLM call (not streaming)
+    // LLM call (ローカル音声対話は無効化 - Discord専用)
     let fullResponse = '';
 
     await new Promise<void>((resolve, reject) => {
         llmRouter.sendMessageStream(history, {
             onToken: (token) => {
-                fullResponse += token;
-
                 fullResponse += token;
                 mainWindow?.webContents.send('llm-token', { token });
                 mascotWindow?.getWindow()?.webContents.send('llm-token', { token });
@@ -152,6 +152,7 @@ async function processVoiceMessage(userText: string): Promise<string> {
 
                 mainWindow?.webContents.send('llm-done', { fullText });
                 mascotWindow?.getWindow()?.webContents.send('llm-done', { fullText });
+
                 resolve();
             },
             onError: (error) => {
@@ -262,6 +263,12 @@ async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string
 
 // Discord音声メッセージを処理
 async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<string> {
+    // 自律発話中は処理をスキップ（競合防止）
+    if (autonomousController.isCurrentlySpeaking()) {
+        console.log('[Discord Voice] Skipped: autonomous speech in progress');
+        return '';
+    }
+
     // whisper
     const transcription = await sttRouter.transcribe(audio.audioBuffer, 16000);
     const userText = transcription.text.trim();
@@ -276,8 +283,12 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
     // ユーザー情報を取得（discordBotが初期化されている場合）
     let speakerName = audio.username;
     let userContext = `発言者: ${audio.username}`;
+    console.log(`[Discord Voice] Looking up user: userId=${audio.userId}, username=${audio.username}`);
+    console.log(`[Discord Voice] Admin config: id=${config.discord.admin?.id}, name=${config.discord.admin?.name}`);
+
     if (discordBot) {
         const name = discordBot.getUserName(audio.userId);
+        console.log(`[Discord Voice] getUserName returned: ${name}`);
         if (name) {
             speakerName = name;
             const isAdmin = config.discord.admin?.id === audio.userId;
@@ -343,11 +354,35 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
     // LLM呼び出し
     let fullResponse = '';
 
+    // ストリーミングTTSを開始（Discord用）
+    if (discordStreamingTTS && ttsEnabled) {
+        discordStreamingTTS.start();
+        // 再生開始通知
+        mascotWindow?.getWindow()?.webContents.send('tts-state', { state: 'playing' });
+    }
+
+    // ユーザーが発話したのでアクティブ状態として通知
+    eventBus.publish({
+        type: 'system:active',
+        priority: EventPriority.HIGH,
+        timestamp: Date.now(),
+        data: {
+            source: 'discord_voice',
+            userId: audio.userId,
+            username: audio.username
+        }
+    });
+
     await new Promise<void>((resolve, reject) => {
         llmRouter.sendMessageStream(history, {
             onToken: (token) => {
                 fullResponse += token;
                 mascotWindow?.getWindow()?.webContents.send('llm-token', { token });
+
+                // ストリーミングTTSにトークンを送信
+                if (discordStreamingTTS && ttsEnabled) {
+                    discordStreamingTTS.onToken(token);
+                }
             },
             onDone: async (fullText) => {
                 fullResponse = fullText;
@@ -355,10 +390,34 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
                 // assistant message save
                 await conversationStorage.addMessage(activeConversationId!, 'assistant', fullText);
 
+                // MemoryManager: 情報抽出・記憶保存 (修正: ここに追加)
+                try {
+                    const extractedInfo = memoryManager.extractInfoFromMessage(userText, fullText);
+                    if (extractedInfo) {
+                        await memoryManager.saveExtractedInfo(extractedInfo, activeConversationId!);
+                        console.log('[Discord Voice] Saved memory:', extractedInfo.content);
+                    }
+                } catch (error) {
+                    console.error('[Discord Voice] Memory extraction failed:', error);
+                }
+
                 mascotWindow?.getWindow()?.webContents.send('llm-done', { fullText });
+
+                // ストリーミングTTSを終了（再生完了まで待つ）
+                if (discordStreamingTTS && ttsEnabled) {
+                    await discordStreamingTTS.onDone();
+                    // 再生終了通知
+                    mascotWindow?.getWindow()?.webContents.send('tts-state', { state: 'idle' });
+                }
+
                 resolve();
             },
             onError: (error) => {
+                // ストリーミングTTSを停止
+                if (discordStreamingTTS) {
+                    discordStreamingTTS.stop();
+                    mascotWindow?.getWindow()?.webContents.send('tts-state', { state: 'idle' });
+                }
                 reject(new Error(error));
             },
         });
@@ -662,26 +721,26 @@ ipcMain.handle('tts-set-speaker', (_event, speakerId: number) => {
     return { success: true };
 });
 
-// IPC: 音声対話
+// IPC: 音声対話 - メインウィンドウでは無効化（Discord専用）
 ipcMain.handle('dialogue-start', async () => {
-    if (!voiceEnabled) {
-        return { success: false, error: 'Voice system not enabled' };
+    if (!voiceDialogue) {
+        return { success: false, error: 'Voice dialogue not available (Discord only)' };
     }
     voiceDialogue.start();
     return { success: true };
 });
 
 ipcMain.handle('dialogue-stop', async () => {
-    if (!voiceEnabled) {
-        return { success: false, error: 'Voice system not enabled' };
+    if (!voiceDialogue) {
+        return { success: false, error: 'Voice dialogue not available (Discord only)' };
     }
     voiceDialogue.stop();
     return { success: true };
 });
 
 ipcMain.handle('dialogue-interrupt', async () => {
-    if (!voiceEnabled) {
-        return { success: false, error: 'Voice system not enabled' };
+    if (!voiceDialogue) {
+        return { success: false, error: 'Voice dialogue not available (Discord only)' };
     }
     voiceDialogue.interrupt();
     return { success: true };
@@ -703,8 +762,8 @@ ipcMain.handle('dialogue-status', async () => {
 });
 
 ipcMain.handle('dialogue-set-auto-listen', async (_event, enabled: boolean) => {
-    if (!voiceEnabled) {
-        return { success: false, error: 'Voice system not enabled' };
+    if (!voiceDialogue) {
+        return { success: false, error: 'Voice dialogue not available (Discord only)' };
     }
     voiceDialogue.setAutoListen(enabled);
     return { success: true };
@@ -1029,7 +1088,9 @@ app.whenReady().then(async () => {
         ttsEnabled = false;
     }
 
-    // 音声対話コントローラの初期化（音声とTTSの両方が有効な場合のみ）
+    // 音声対話コントローラの初期化 - 無効化（Discord専用に変更）
+    // メインウィンドウはテキストチャットのみ、音声機能はDiscord/マスコットウィンドウで使用
+    /*
     if (voiceEnabled && ttsEnabled) {
         voiceDialogue = new VoiceDialogueController(
             microphoneCapture,
@@ -1062,6 +1123,8 @@ app.whenReady().then(async () => {
 
         console.log('[App] Voice dialogue controller initialized');
     }
+    */
+    console.log('[App] Main window: Text chat only (voice disabled)');
 
     // Discord Botの初期化
     const discordToken = process.env.DISCORD_BOT_TOKEN;
@@ -1082,7 +1145,30 @@ app.whenReady().then(async () => {
             // voice message handler setting
             discordBot.setVoiceMessageHandler(processDiscordVoiceMessage);
 
-            // voice response event
+            // Discord用ストリーミングTTSコントローラの初期化
+            if (ttsEnabled) {
+                discordStreamingTTS = new StreamingTTSController(
+                    voicevoxProvider,
+                    undefined, // ローカルプレイヤーは使わない
+                    async (buffer) => {
+                        if (discordBot) {
+                            await discordBot.playAudio(buffer);
+                        }
+                    }
+                );
+                discordStreamingTTS.on('sentenceDetected', (data) => {
+                    console.log(`[DiscordStreamingTTS] Sentence: "${data.text}"`);
+                });
+                discordStreamingTTS.on('error', (data) => {
+                    console.error('[DiscordStreamingTTS] Error:', data.error);
+                });
+                console.log('[App] Discord StreamingTTS initialized');
+            }
+
+            // voice response event - ストリーミングTTSで処理するため無効化
+            // Note: processDiscordVoiceMessage内でストリーミングTTSを使用するため、
+            // このイベントハンドラは不要になりました
+            /*
             discordBot.on('voiceResponse', async (data: { text: string; targetUserId: string; targetUsername: string }) => {
                 if (ttsEnabled && discordBot) {
                     try {
@@ -1104,6 +1190,7 @@ app.whenReady().then(async () => {
                     }
                 }
             });
+            */
 
             // transport event to Renderer
             discordBot.on('ready', (tag: string) => {
@@ -1207,13 +1294,13 @@ app.whenReady().then(async () => {
 
     // 発話状態チェッカーを設定
     autonomousController.setIsSpeakingChecker(() => {
-        // ローカルでの発話チェック
-        if (typeof voiceDialogue !== 'undefined' && voiceDialogue && voiceDialogue.getState() === 'speaking') {
+        // Discordでの発話チェック
+        if (discordBot && discordBot.isSpeaking()) {
             return true;
         }
 
-        // Discordでの発話チェック
-        if (discordBot && discordBot.isSpeaking()) {
+        // ストリーミングTTSでの発話チェック
+        if (discordStreamingTTS && discordStreamingTTS.isSpeaking()) {
             return true;
         }
 

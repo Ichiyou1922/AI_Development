@@ -6,3 +6,4 @@ export * from './microphoneCapture.js';
 export * from './voicevoxProvider.js'
 export * from './audioPlayer.js';
 export * from './voiceDialogueController.js';
+export * from './streamingTTSController.js';

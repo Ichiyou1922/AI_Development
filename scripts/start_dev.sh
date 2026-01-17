@@ -28,6 +28,12 @@ echo -e "${GREEN}Ollama is ready.${NC}"
 
 # 2. VOICEVOX Engine (Docker) Check
 echo -e "\n${YELLOW}[2/3] Checking VOICEVOX Engine (Docker/CPU)...${NC}"
+# GPU版が起動している場合は停止
+if [ "$(sudo docker ps -q -f name=voicevox_engine_gpu)" ]; then
+    echo "Stopping running GPU Voicevox container..."
+    sudo docker stop voicevox_engine_gpu > /dev/null
+fi
+
 CONTAINER_NAME="voicevox_engine_cpu"
 IMAGE_NAME="voicevox/voicevox_engine:cpu-ubuntu20.04-latest"
 

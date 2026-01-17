@@ -90,30 +90,52 @@ export class VoicevoxProvider implements TTSProvider {
         console.log(`[VoicevoxProvider] Synthesizing: "${text.substring(0, 50)}..."`);
 
         // Step 1: AudioQueryを生成
-        const queryResponse = await fetch(
-            `${this.baseUrl}/audio_query?text=${encodeURIComponent(text)}&speaker=${this.speakerId}`,
-            { method: 'POST' }
-        );
+        const queryController = new AbortController();
+        const queryTimeout = setTimeout(() => queryController.abort(), 10000); // 10秒
 
-        if (!queryResponse.ok) {
-            const errorText = await queryResponse.text().catch(() => '');
-            throw new Error(`AudioQuery failed: ${queryResponse.status} - ${errorText}`);
+        let audioQuery: AudioQuery;
+
+        try {
+            const queryResponse = await fetch(
+                `${this.baseUrl}/audio_query?text=${encodeURIComponent(text)}&speaker=${this.speakerId}`,
+                {
+                    method: 'POST',
+                    signal: queryController.signal
+                }
+            );
+
+            if (!queryResponse.ok) {
+                const errorText = await queryResponse.text().catch(() => '');
+                throw new Error(`AudioQuery failed: ${queryResponse.status} - ${errorText}`);
+            }
+
+            audioQuery = await queryResponse.json();
+        } finally {
+            clearTimeout(queryTimeout);
         }
-
-        const audioQuery: AudioQuery = await queryResponse.json();
 
         // 読み上げ速度を設定値で上書き
         audioQuery.speedScale = this.speedScale;
 
         // Step 2: 音声合成
-        const synthesisResponse = await fetch(
-            `${this.baseUrl}/synthesis?speaker=${this.speakerId}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(audioQuery),
-            }
-        );
+        const synthesisController = new AbortController();
+        const synthesisTimeout = setTimeout(() => synthesisController.abort(), 60000); // 60秒
+        let synthesisResponse;
+
+        try {
+            synthesisResponse = await fetch(
+                `${this.baseUrl}/synthesis?speaker=${this.speakerId}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(audioQuery),
+                    signal: synthesisController.signal
+                }
+            );
+
+        } finally {
+            clearTimeout(synthesisTimeout);
+        }
 
         if (!synthesisResponse.ok) {
             const errorText = await synthesisResponse.text().catch(() => '');

@@ -50,6 +50,7 @@ export class AutonomousController extends EventEmitter {
     private workStartTime: number = Date.now();
     private isUserActive: boolean = true;
     private lastIdleTime: number = 0;
+    private idleStartTimestamp: number = 0;
 
     // システムプロンプト（外部から注入）
     private systemPrompt: string = '';
@@ -63,11 +64,21 @@ export class AutonomousController extends EventEmitter {
     // 発話状態チェッカー（外部から注入）
     private isSpeakingChecker: (() => boolean) | null = null;
 
+    // 自律発話中フラグ（競合防止用）
+    private isAutonomousSpeaking: boolean = false;
+
     /**
      * 発話状態チェッカーを設定
      */
     setIsSpeakingChecker(checker: () => boolean): void {
         this.isSpeakingChecker = checker;
+    }
+
+    /**
+     * 自律発話中かどうかを取得
+     */
+    isCurrentlySpeaking(): boolean {
+        return this.isAutonomousSpeaking;
     }
 
     constructor() {
@@ -135,7 +146,7 @@ export class AutonomousController extends EventEmitter {
     updateConfig(config: Partial<AutonomousConfig>): void {
         this.config = { ...this.config, ...config };
         console.log('[Autonomous] Config updated:', this.config);
-    }
+    }    // ... (skip) ...
 
     /**
      * アイドル状態の処理
@@ -144,6 +155,7 @@ export class AutonomousController extends EventEmitter {
         this.isUserActive = false;
         const idleTime = (event.data as any)?.idleTime || 0;
         this.lastIdleTime = idleTime;
+        this.idleStartTimestamp = Date.now() - (idleTime * 1000); // 実際にアイドル開始した時刻を推計
 
         console.log(`[Autonomous] User became idle (idleTime: ${idleTime}s)`);
 
@@ -191,14 +203,35 @@ export class AutonomousController extends EventEmitter {
         }
     }
 
+    // ... (skip) ...
+
     /**
      * 定期チェックと行動
      */
     private async checkAndAct(): Promise<void> {
         if (!this.config.enabled) return;
-        if (!this.isUserActive) return;
 
         this.resetDailyCountIfNeeded();
+
+        // ユーザーがアクティブでない場合の処理（長時間放置）
+        if (!this.isUserActive) {
+            const currentIdleTimeSeconds = Math.floor((Date.now() - this.idleStartTimestamp) / 1000);
+
+            // アイドル状態が続いている場合、たまに話しかける
+            // 例: 30分経過毎など (ここでは簡易的にチェック間隔で判定)
+            // workDurationMs (デフォルト60分?) を再利用するか、または別の閾値を使う
+            // ここでは workDurationMs / 2 (30分程度) 以上のアイドルで発話検討
+            if (currentIdleTimeSeconds * 1000 >= this.config.workDurationMs / 2) {
+                const context = this.buildContext('idle', {
+                    idleTimeSeconds: currentIdleTimeSeconds,
+                    note: 'ユーザーは長時間反応がない'
+                });
+                // トリガー名を変更して区別してもよいが、'idle'のままでも通じる
+                // 文脈に「長時間」を含める
+                this.trySpeak(context);
+            }
+            return;
+        }
 
         // 作業時間チェック
         const workDuration = Date.now() - this.workStartTime;
@@ -224,6 +257,8 @@ export class AutonomousController extends EventEmitter {
         await this.trySpeak(context);
     }
 
+    // ... (skip) ...
+
     /**
      * 状況コンテキストを構築
      */
@@ -232,6 +267,7 @@ export class AutonomousController extends EventEmitter {
         extra?: Partial<SituationContext>
     ): SituationContext {
         const now = new Date();
+
         const hour = now.getHours();
 
         // 時間帯を判定
@@ -278,44 +314,40 @@ export class AutonomousController extends EventEmitter {
             return;
         }
 
-        const message = await this.generateMessage(context);
-        if (!message || message.trim() === '') {
-            console.log('[Autonomous] No message generated (AI decided not to speak)');
-            return;
-        }
+        // 自律発話中フラグを立てる
+        this.isAutonomousSpeaking = true;
 
-        // カウンタ更新
-        this.lastActionTime = Date.now();
-        this.dailyActionCount++;
-
-        // 作業提案後は作業時間リセット
-        if (context.trigger === 'timer') {
-            this.workStartTime = Date.now();
-        }
-
-        console.log(`[Autonomous] Speaking: ${message.substring(0, 50)}...`);
-
-        /** 
-        // イベントを発行（ローカルUI用）
-        this.emit('action', {
-            type: context.trigger,
-            message,
-            context,
-            timestamp: Date.now(),
-        });
-        **/
-
-
-        // Discordにも送信
-        if (this.discordHandler) {
-            try {
-                await this.discordHandler(message);
-                console.log('[Autonomous] Message sent to Discord');
-            } catch (error) {
-                console.error('[Autonomous] Discord send failed:', error);
+        try {
+            const message = await this.generateMessage(context);
+            if (!message || message.trim() === '') {
+                console.log('[Autonomous] No message generated (AI decided not to speak)');
+                return;
             }
-        }
 
+            // カウンタ更新
+            this.lastActionTime = Date.now();
+            this.dailyActionCount++;
+
+            // 作業提案後は作業時間リセット
+            if (context.trigger === 'timer') {
+                this.workStartTime = Date.now();
+            }
+
+            console.log(`[Autonomous] Speaking: ${message.substring(0, 50)}...`);
+
+            // Discordにも送信
+            if (this.discordHandler) {
+                try {
+                    await this.discordHandler(message);
+                    console.log('[Autonomous] Message sent to Discord');
+                } catch (error) {
+                    console.error('[Autonomous] Discord send failed:', error);
+                }
+            }
+        } finally {
+            // 必ずフラグを解除
+            this.isAutonomousSpeaking = false;
+        }
     }
 
     /**
