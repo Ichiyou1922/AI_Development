@@ -488,6 +488,24 @@ async function callWithErrorHandling() {
 | `discord-status` | invoke | 状態取得 |
 | `discord-voice-join` | invoke | VC 参加 |
 | `discord-voice-leave` | invoke | VC 退出 |
+| `discord-voice-status` | invoke | VC 状態取得 |
+
+### 5.7 Discord ユーザー管理（新機能）
+
+| チャンネル | 方向 | 説明 |
+|-----------|------|------|
+| `discord-users-get-all` | invoke | 全ユーザー取得 |
+| `discord-users-stats` | invoke | ユーザー統計取得 |
+| `discord-users-get` | invoke | 特定ユーザー取得 |
+| `discord-users-set-name` | invoke | 呼び名を設定 |
+
+### 5.8 管理機能
+
+| チャンネル | 方向 | 説明 |
+|-----------|------|------|
+| `get-provider-preference` | invoke | LLM 設定取得 |
+| `set-provider-preference` | invoke | LLM 設定更新 |
+| `show-mascot` | invoke | マスコットウィンドウ表示 |
 
 ---
 

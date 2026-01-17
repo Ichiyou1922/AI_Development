@@ -196,104 +196,268 @@ console.log('タイマー設定:', result);
 
 ---
 
-### 2.2 例：新しい IPC 機能の追加
+### 2.2 例：Discord ユーザー管理機能の追加（実際の実装例）
 
-「アプリ設定の取得・更新」機能を追加する例。
+本プロジェクトで実装された「Discord ユーザー管理」機能を例に説明する。
 
 #### Step 1: 設計
 
 ```
 機能要件：
-- Renderer から現在の設定を取得
-- Renderer から設定を更新
-- 更新後は再起動不要で反映
+- Discord ユーザーの情報を記録・管理する
+- ユーザーごとに呼び名（preferred name）を設定できる
+- 管理画面でユーザー一覧を表示できる
 
 影響範囲：
-- Main: 設定読み書き
-- Preload: IPC ブリッジ
-- Renderer: 設定画面 UI
+- memory/ に新しいモジュールを追加
+- IPC ハンドラを追加
+- 管理画面（admin.ts）に UI を追加
 ```
 
 #### Step 2: 型定義
 
 ```typescript
-// src/main/config/types.ts に追加
+// src/main/memory/discordUsers.ts
 
-export interface SettingsUpdate {
-  path: string;   // 'llm.preference' のようなドット区切りパス
-  value: any;     // 新しい値
+export interface DiscordUser {
+    discordId: string;           // Discord のユーザー ID
+    displayName: string;         // Discord 表示名
+    preferredName?: string;      // AI が呼ぶ名前
+    firstSeen: number;           // 初回認識時刻
+    lastSeen: number;            // 最終認識時刻
+    messageCount: number;        // メッセージ数
+}
+
+export interface DiscordUserStats {
+    totalUsers: number;
+    namedUsers: number;          // preferred name が設定されているユーザー数
 }
 ```
 
 #### Step 3: Main Process 実装
 
 ```typescript
-// src/main/index.ts に IPC ハンドラ追加
+// src/main/memory/discordUsers.ts
 
-import { getConfig, updateConfig } from './config';
+import Database from 'better-sqlite3';
+import * as path from 'path';
+import { app } from 'electron';
 
-// 設定取得
-ipcMain.handle('settings-get', async () => {
-  console.log('[IPC] settings-get');
-  return getConfig();
+export class DiscordUserManager {
+    private db: Database.Database;
+
+    constructor() {
+        const dbPath = path.join(app.getPath('userData'), 'discord_users.db');
+        this.db = new Database(dbPath);
+        this.initTable();
+    }
+
+    private initTable(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS discord_users (
+                discord_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                preferred_name TEXT,
+                first_seen INTEGER NOT NULL,
+                last_seen INTEGER NOT NULL,
+                message_count INTEGER DEFAULT 0
+            )
+        `);
+    }
+
+    // ユーザー情報を取得または作成
+    getOrCreateUser(discordId: string, displayName: string): DiscordUser {
+        const existing = this.db.prepare(
+            'SELECT * FROM discord_users WHERE discord_id = ?'
+        ).get(discordId) as any;
+
+        if (existing) {
+            // 最終アクセス時刻とメッセージ数を更新
+            this.db.prepare(`
+                UPDATE discord_users
+                SET last_seen = ?, message_count = message_count + 1, display_name = ?
+                WHERE discord_id = ?
+            `).run(Date.now(), displayName, discordId);
+
+            return {
+                discordId: existing.discord_id,
+                displayName: displayName,
+                preferredName: existing.preferred_name,
+                firstSeen: existing.first_seen,
+                lastSeen: Date.now(),
+                messageCount: existing.message_count + 1
+            };
+        }
+
+        // 新規ユーザーを作成
+        const now = Date.now();
+        this.db.prepare(`
+            INSERT INTO discord_users (discord_id, display_name, first_seen, last_seen, message_count)
+            VALUES (?, ?, ?, ?, 1)
+        `).run(discordId, displayName, now, now);
+
+        return {
+            discordId,
+            displayName,
+            firstSeen: now,
+            lastSeen: now,
+            messageCount: 1
+        };
+    }
+
+    // 呼び名を設定
+    setPreferredName(discordId: string, name: string): void {
+        this.db.prepare(
+            'UPDATE discord_users SET preferred_name = ? WHERE discord_id = ?'
+        ).run(name, discordId);
+    }
+
+    // 全ユーザーを取得
+    getAllUsers(): DiscordUser[] {
+        const rows = this.db.prepare(
+            'SELECT * FROM discord_users ORDER BY last_seen DESC'
+        ).all() as any[];
+
+        return rows.map(row => ({
+            discordId: row.discord_id,
+            displayName: row.display_name,
+            preferredName: row.preferred_name,
+            firstSeen: row.first_seen,
+            lastSeen: row.last_seen,
+            messageCount: row.message_count
+        }));
+    }
+
+    // 統計情報を取得
+    getStats(): DiscordUserStats {
+        const total = this.db.prepare(
+            'SELECT COUNT(*) as count FROM discord_users'
+        ).get() as any;
+
+        const named = this.db.prepare(
+            'SELECT COUNT(*) as count FROM discord_users WHERE preferred_name IS NOT NULL'
+        ).get() as any;
+
+        return {
+            totalUsers: total.count,
+            namedUsers: named.count
+        };
+    }
+}
+
+// シングルトンインスタンス
+let userManager: DiscordUserManager | null = null;
+
+export function getDiscordUserManager(): DiscordUserManager {
+    if (!userManager) {
+        userManager = new DiscordUserManager();
+    }
+    return userManager;
+}
+```
+
+#### Step 4: IPC ハンドラ追加
+
+```typescript
+// src/main/index.ts に追加
+
+import { getDiscordUserManager } from './memory/discordUsers.js';
+
+// Discord ユーザー管理 IPC
+ipcMain.handle('discord-users-get-all', async () => {
+    console.log('[IPC] discord-users-get-all');
+    const manager = getDiscordUserManager();
+    return manager.getAllUsers();
 });
 
-// 設定更新
-ipcMain.handle('settings-update', async (event, update: SettingsUpdate) => {
-  console.log('[IPC] settings-update:', update);
-  try {
-    await updateConfig(update.path, update.value);
+ipcMain.handle('discord-users-stats', async () => {
+    console.log('[IPC] discord-users-stats');
+    const manager = getDiscordUserManager();
+    return manager.getStats();
+});
+
+ipcMain.handle('discord-users-get', async (event, discordId: string) => {
+    console.log('[IPC] discord-users-get:', discordId);
+    const manager = getDiscordUserManager();
+    const users = manager.getAllUsers();
+    return users.find(u => u.discordId === discordId);
+});
+
+ipcMain.handle('discord-users-set-name', async (event, discordId: string, name: string) => {
+    console.log('[IPC] discord-users-set-name:', discordId, name);
+    const manager = getDiscordUserManager();
+    manager.setPreferredName(discordId, name);
     return { success: true };
-  } catch (error) {
-    return { success: false, error: (error as Error).message };
-  }
 });
 ```
 
-#### Step 4: Preload 更新
+#### Step 5: Preload 更新
 
 ```typescript
 // src/preload/index.ts に追加
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  // 既存のメソッド...
+    // 既存のメソッド...
 
-  // 設定関連
-  settingsGet: () => ipcRenderer.invoke('settings-get'),
-  settingsUpdate: (update: { path: string; value: any }) =>
-    ipcRenderer.invoke('settings-update', update),
+    // Discord ユーザー管理
+    discordUsersGetAll: () => ipcRenderer.invoke('discord-users-get-all'),
+    discordUsersStats: () => ipcRenderer.invoke('discord-users-stats'),
+    discordUsersGet: (discordId: string) =>
+        ipcRenderer.invoke('discord-users-get', discordId),
+    discordUsersSetName: (discordId: string, name: string) =>
+        ipcRenderer.invoke('discord-users-set-name', discordId, name),
 });
 ```
 
-#### Step 5: Renderer 実装
+#### Step 6: Renderer（管理画面）実装
 
 ```typescript
-// src/renderer/renderer.ts に追加
+// src/renderer/admin.ts に追加
 
-// 設定を取得して表示
-async function loadSettings() {
-  const settings = await window.electronAPI.settingsGet();
-  console.log('現在の設定:', settings);
+// ============================================================
+// ユーザー管理
+// ============================================================
 
-  // UIに反映
-  document.getElementById('llm-preference')!.value = settings.llm.preference;
+const usersRefreshBtn = document.getElementById('users-refresh-btn');
+const usersList = document.getElementById('users-list');
+
+async function loadUsersData(): Promise<void> {
+    try {
+        const stats = await (window as any).electronAPI.discordUsersStats();
+        document.getElementById('users-total')!.textContent = String(stats?.totalUsers || 0);
+        document.getElementById('users-named')!.textContent = String(stats?.namedUsers || 0);
+
+        const users = await (window as any).electronAPI.discordUsersGetAll();
+        renderUsersList(users || []);
+    } catch (error) {
+        console.error('Failed to load users:', error);
+    }
 }
 
-// 設定を更新
-async function updateSetting(path: string, value: any) {
-  const result = await window.electronAPI.settingsUpdate({ path, value });
-  if (result.success) {
-    console.log('設定を更新しました');
-  } else {
-    console.error('更新失敗:', result.error);
-  }
+function renderUsersList(users: any[]): void {
+    if (!usersList) return;
+
+    if (users.length === 0) {
+        usersList.innerHTML = '<p class="no-data">登録ユーザーがいません</p>';
+        return;
+    }
+
+    usersList.innerHTML = users.map(user => `
+        <div class="user-item">
+            <div class="user-header">
+                <span class="user-name">${escapeHtml(user.preferredName || user.displayName)}</span>
+                <span class="user-id">ID: ${user.discordId}</span>
+            </div>
+            <div class="user-meta">
+                メッセージ数: ${user.messageCount || 0} |
+                初回: ${formatDate(user.firstSeen)} |
+                最終: ${formatDate(user.lastSeen)}
+            </div>
+        </div>
+    `).join('');
 }
 
-// 使用例
-document.getElementById('save-settings')?.addEventListener('click', () => {
-  const newPreference = document.getElementById('llm-preference')!.value;
-  updateSetting('llm.preference', newPreference);
-});
+usersRefreshBtn?.addEventListener('click', loadUsersData);
 ```
 
 ---
@@ -348,13 +512,13 @@ export class TTSRouter {
 
 ```typescript
 // 1. イベント定義
-// src/main/events/eventTypes.ts（新規または追加）
-export const EventTypes = {
-  SYSTEM_IDLE: 'system:idle',
-  SYSTEM_ACTIVE: 'system:active',
-  MEMORY_ADDED: 'memory:added',     // 新規
-  MEMORY_SEARCHED: 'memory:searched' // 新規
-} as const;
+// src/main/events/types.ts
+export type EventType =
+    | 'system:idle'
+    | 'system:active'
+    | 'user:ignoring'
+    | 'memory:added'      // 新規
+    | 'memory:searched';  // 新規
 
 // 2. イベント発火
 // src/main/memory/memoryManager.ts
@@ -362,11 +526,11 @@ async addMemory(content: string, type: string) {
   const id = await this.vectorStore.add(...);
 
   // イベント発火
-  eventBus.emit(EventTypes.MEMORY_ADDED, {
-    id,
-    content,
-    type,
-    timestamp: Date.now()
+  eventBus.publish({
+    type: 'memory:added',
+    priority: EventPriority.LOW,
+    timestamp: Date.now(),
+    data: { id, content, type }
   });
 
   return id;
@@ -374,7 +538,7 @@ async addMemory(content: string, type: string) {
 
 // 3. イベント購読
 // 使用箇所（例：自律行動コントローラ）
-eventBus.register(EventTypes.MEMORY_ADDED, (event) => {
+eventBus.register('memory:added', (event) => {
   console.log('新しいメモリが追加されました:', event);
 });
 ```
@@ -408,6 +572,10 @@ eventBus.register(EventTypes.MEMORY_ADDED, (event) => {
 □ 設定（必要な場合）
   - config/types.ts に型を追加したか
   - config/default.json にデフォルト値を追加したか
+
+□ Discord 連携（必要な場合）
+  - discordBot.ts に処理を追加したか
+  - ユーザー情報を記録しているか（discordUsers.ts）
 
 □ テスト
   - 手動でテストしたか
@@ -476,6 +644,25 @@ npm run build
 
 # 3. 再起動
 # アプリを完全に終了してから再起動
+```
+
+### 5.4 Discord Bot が反応しない
+
+**症状**：メッセージを送信しても Bot が反応しない
+
+**対処**：
+
+```typescript
+// 1. Bot のログイン状態を確認
+console.log('[Discord] Bot状態:', discordBot.isReady());
+
+// 2. MESSAGE CONTENT INTENT が有効か確認
+// Discord Developer Portal で確認
+
+// 3. prefix の確認
+const config = getConfig();
+console.log('prefix:', config.discord.prefix);
+// prefix なしでも常時会話モードなら反応する
 ```
 
 ---
@@ -557,7 +744,51 @@ export class MyProvider {
 }
 ```
 
+### 6.4 管理画面（admin.ts）の機能追加テンプレート
+
+```typescript
+// src/renderer/admin.ts に追加
+
+// ============================================================
+// 新機能セクション
+// ============================================================
+
+const myRefreshBtn = document.getElementById('my-refresh-btn');
+const myContainer = document.getElementById('my-container');
+
+async function loadMyData(): Promise<void> {
+    try {
+        const data = await (window as any).electronAPI.myDataGet();
+        renderMyData(data);
+    } catch (error) {
+        console.error('Failed to load my data:', error);
+        if (myContainer) {
+            myContainer.innerHTML = '<p class="error">データの読み込みに失敗しました</p>';
+        }
+    }
+}
+
+function renderMyData(data: any[]): void {
+    if (!myContainer) return;
+
+    if (data.length === 0) {
+        myContainer.innerHTML = '<p class="no-data">データがありません</p>';
+        return;
+    }
+
+    myContainer.innerHTML = data.map(item => `
+        <div class="my-item">
+            <span class="title">${escapeHtml(item.title)}</span>
+            <span class="meta">${formatDate(item.timestamp)}</span>
+        </div>
+    `).join('');
+}
+
+myRefreshBtn?.addEventListener('click', loadMyData);
+```
+
 ## 関連ドキュメント
 
 - [01-architecture-overview.md](01-architecture-overview.md) - アーキテクチャ概要
 - [03-ipc-handler-development.md](03-ipc-handler-development.md) - IPC ハンドラ開発の詳細
+- [06-adding-new-events.md](06-adding-new-events.md) - イベント追加ガイド

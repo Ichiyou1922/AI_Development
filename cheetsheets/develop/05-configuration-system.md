@@ -711,7 +711,159 @@ const preference = config.llm.preference;
 const preference = config.llm.preference as LLMPreference;
 ```
 
+---
+
+## 9. 動的設定（autonomous.ts）
+
+自律行動システムなど、環境によって設定を切り替えたい場合は、JSON ではなく **TypeScript での動的設定** を使用します。
+
+### 9.1 動的設定の構造
+
+```typescript
+// src/main/config/autonomous.ts
+
+// 型定義
+export interface AutonomousConfig {
+    enabled: boolean;
+    minIntervalMs: number;
+    maxDailyActions: number;
+    workDurationMs: number;
+    idleThresholdMs: number;
+    greetingIdleThresholdSeconds: number;
+}
+
+export interface IdleDetectorConfig {
+    idleThresholdSeconds: number;
+    checkIntervalMs: number;
+}
+
+export interface IgnoreDetectorConfig {
+    ignoreThresholdSeconds: number;
+    checkIntervalMs: number;
+}
+```
+
+### 9.2 本番用とテスト用の設定
+
+```typescript
+// 本番用設定
+export const productionConfig: AutonomousConfig = {
+    enabled: true,
+    minIntervalMs: 30 * 60 * 1000,          // 30分
+    maxDailyActions: 5,
+    workDurationMs: 60 * 60 * 1000,         // 1時間
+    idleThresholdMs: 5 * 60 * 1000,         // 5分
+    greetingIdleThresholdSeconds: 600,      // 10分
+};
+
+export const productionIdleConfig: IdleDetectorConfig = {
+    idleThresholdSeconds: 300,              // 5分
+    checkIntervalMs: 60000,                 // 1分ごとにチェック
+};
+
+export const productionIgnoreConfig: IgnoreDetectorConfig = {
+    ignoreThresholdSeconds: 30,             // 30秒
+    checkIntervalMs: 10000,                 // 10秒ごとにチェック
+};
+
+// テスト用設定（短い間隔）
+export const testConfig: AutonomousConfig = {
+    enabled: true,
+    minIntervalMs: 10 * 1000,               // 10秒
+    maxDailyActions: 10,
+    workDurationMs: 2 * 60 * 1000,          // 2分
+    idleThresholdMs: 10 * 1000,             // 10秒
+    greetingIdleThresholdSeconds: 30,       // 30秒
+};
+
+export const testIdleConfig: IdleDetectorConfig = {
+    idleThresholdSeconds: 10,               // 10秒
+    checkIntervalMs: 5000,                  // 5秒ごとにチェック
+};
+
+export const testIgnoreConfig: IgnoreDetectorConfig = {
+    ignoreThresholdSeconds: 10,             // 10秒
+    checkIntervalMs: 5000,                  // 5秒ごとにチェック
+};
+```
+
+### 9.3 環境に応じた設定の取得
+
+```typescript
+/**
+ * 環境に応じた設定を取得
+ * NODE_ENV=test または AUTONOMOUS_TEST=true でテスト設定を使用
+ */
+export function getAutonomousConfig(): AutonomousConfig {
+    const isTest = process.env.NODE_ENV === 'test' ||
+                   process.env.AUTONOMOUS_TEST === 'true';
+    return isTest ? testConfig : productionConfig;
+}
+
+export function getIdleDetectorConfig(): IdleDetectorConfig {
+    const isTest = process.env.NODE_ENV === 'test' ||
+                   process.env.AUTONOMOUS_TEST === 'true';
+    return isTest ? testIdleConfig : productionIdleConfig;
+}
+
+export function getIgnoreDetectorConfig(): IgnoreDetectorConfig {
+    const isTest = process.env.NODE_ENV === 'test' ||
+                   process.env.AUTONOMOUS_TEST === 'true';
+    return isTest ? testIgnoreConfig : productionIgnoreConfig;
+}
+```
+
+### 9.4 使用例
+
+```typescript
+// src/main/index.ts
+import {
+    getAutonomousConfig,
+    getIdleDetectorConfig,
+    getIgnoreDetectorConfig
+} from './config/autonomous.js';
+
+// 設定を取得
+const autonomousConfig = getAutonomousConfig();
+const idleConfig = getIdleDetectorConfig();
+const ignoreConfig = getIgnoreDetectorConfig();
+
+// イベント検出器を初期化
+idleDetector.start(idleConfig);
+ignoreDetector.start(ignoreConfig);
+
+// 自律行動コントローラを初期化
+autonomousController.initialize({
+    enabled: autonomousConfig.enabled,
+    minInterval: autonomousConfig.minIntervalMs,
+    maxDaily: autonomousConfig.maxDailyActions
+});
+```
+
+### 9.5 テストモードでの起動
+
+```bash
+# テストモードで起動（短い間隔で動作確認）
+AUTONOMOUS_TEST=true npm run dev
+
+# または
+NODE_ENV=test npm run dev
+```
+
+### 9.6 動的設定と JSON 設定の使い分け
+
+| 設定タイプ | 使用場面 | 例 |
+|-----------|---------|-----|
+| JSON (`config/`) | ユーザーがカスタマイズする設定 | API URL、モデル名、スピーカー ID |
+| TypeScript (`autonomous.ts`) | 環境依存・デバッグ用の設定 | タイマー間隔、閾値 |
+
+**動的設定を使う場合**：
+- 本番とテストで値を大きく変えたい場合
+- 値が相互に関連している場合（例：アイドル時間とチェック間隔）
+- コード内で計算が必要な場合
+
 ## 関連ドキュメント
 
 - [01-architecture-overview.md](01-architecture-overview.md) - アーキテクチャ概要
 - [../debug/05-html-json-debugging.md](../debug/05-html-json-debugging.md) - JSON デバッグ
+- [06-adding-new-events.md](06-adding-new-events.md) - イベント追加ガイド

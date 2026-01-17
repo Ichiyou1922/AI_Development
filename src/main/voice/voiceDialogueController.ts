@@ -290,8 +290,8 @@ export class VoiceDialogueController extends EventEmitter {
         this.ignoreTimer = setTimeout(() => {
             console.log('[VoiceDialogue] User ignore detected');
 
-            // 毎回反応するとうるさいので、30%の確率でのみ反応する
-            if (Math.random() > 0.3) {
+            // 毎回反応するとうるさいので、40%の確率でのみ反応する
+            if (Math.random() > 0.4) {
                 console.log('[VoiceDialogue] Skipping ignore reaction (random check)');
                 this.hasSpoken = false; // 反応しなくてもフラグはリセット
                 return;

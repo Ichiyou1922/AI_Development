@@ -30,7 +30,8 @@ cheetsheets/
     ├── 03-ipc-handler-development.md
     ├── 04-frontend-development.md
     ├── 05-configuration-system.md
-    └── 06-adding-new-events.md
+    ├── 06-adding-new-events.md
+    └── 07-web-search-integration.md  # 新規追加
 ```
 
 ---
@@ -94,6 +95,8 @@ cheetsheets/
 - 各コンポーネントの役割
 - データフローの理解
 - 設計パターン
+- **NEW**: Discord を主要インターフェースとした構成
+- **NEW**: ConversationContextManager による多人数会話管理
 
 ### [02-adding-new-features.md](develop/02-adding-new-features.md)
 **新機能追加ガイド**
@@ -102,6 +105,7 @@ cheetsheets/
 - どこから書き始めるか
 - 新しいツール機能の追加例
 - 新しい IPC 機能の追加例
+- **NEW**: Discord ユーザー管理機能の実装例
 - チェックリスト
 
 ### [03-ipc-handler-development.md](develop/03-ipc-handler-development.md)
@@ -111,6 +115,7 @@ cheetsheets/
 - invoke/handle パターン
 - ストリーミングパターン
 - 本プロジェクトの IPC チャンネル一覧
+- **NEW**: Discord ユーザー管理 IPC
 - ベストプラクティス
 
 ### [04-frontend-development.md](develop/04-frontend-development.md)
@@ -121,6 +126,7 @@ cheetsheets/
 - TypeScript でのイベント処理
 - Live2D 開発
 - よくあるパターン（ローディング、トースト、モーダル）
+- **NEW**: 管理者ウィンドウ（admin.ts）の開発
 
 ### [05-configuration-system.md](develop/05-configuration-system.md)
 **設定システム**
@@ -130,6 +136,7 @@ cheetsheets/
 - 新しい設定項目の追加手順
 - 環境変数の使い方
 - 動的な設定更新
+- **NEW**: autonomous.ts による動的設定
 
 ### [06-adding-new-events.md](develop/06-adding-new-events.md)
 **新イベント追加ガイド**
@@ -137,7 +144,17 @@ cheetsheets/
 - イベント駆動アーキテクチャの概要
 - 型定義から実装までの詳細ステップ
 - 自律行動（AutonomousController）への統合
-- 実践例：無視イベントの実装
+- **NEW**: IgnoreDetector の実装例
+- 検出器クラスのテンプレート
+
+### [07-web-search-integration.md](develop/07-web-search-integration.md) (NEW)
+**Web 検索機能の追加**
+
+- Web 検索 API の選択肢（Google、Bing、DuckDuckGo 等）
+- LLM ツールとしての Web 検索実装
+- 検索結果の処理とフォーマット
+- レート制限とキャッシュの考慮
+- セキュリティ上の注意点
 
 ---
 
@@ -184,6 +201,9 @@ npm run build
 # 開発モードで起動
 npm run dev
 
+# テストモードで起動（短い間隔で自律行動）
+AUTONOMOUS_TEST=true npm run dev
+
 # クリーンビルド
 rm -rf dist/ && npm run build
 
@@ -221,23 +241,23 @@ curl http://localhost:50021/speakers  # VOICEVOX
 「Bot」ページで以下を設定：
 
 **Privileged Gateway Intents**（必須）：
-- ✅ MESSAGE CONTENT INTENT（メッセージ内容の読み取り）
-- ✅ SERVER MEMBERS INTENT（メンバー情報の取得）
-- ✅ PRESENCE INTENT（プレゼンス情報）
+- MESSAGE CONTENT INTENT（メッセージ内容の読み取り）
+- SERVER MEMBERS INTENT（メンバー情報の取得）
+- PRESENCE INTENT（プレゼンス情報）
 
 ### 4. OAuth2 で招待 URL を生成
 
 1. 左メニューから「OAuth2」→「URL Generator」を選択
 2. **Scopes** で以下を選択：
-   - ✅ `bot`
-   - ✅ `applications.commands`（スラッシュコマンドを使う場合）
+   - `bot`
+   - `applications.commands`（スラッシュコマンドを使う場合）
 
 3. **Bot Permissions** で以下を選択：
-   - ✅ Send Messages
-   - ✅ Read Message History
-   - ✅ Connect（VC に参加）
-   - ✅ Speak（VC で発言）
-   - ✅ Use Voice Activity
+   - Send Messages
+   - Read Message History
+   - Connect（VC に参加）
+   - Speak（VC で発言）
+   - Use Voice Activity
 
 4. 生成された URL をコピー
 
@@ -282,14 +302,19 @@ npm run dev
 
 | ファイル | 役割 |
 |---------|------|
-| `src/main/index.ts` | エントリーポイント、IPC 定義 |
+| `src/main/index.ts` | エントリーポイント、IPC 定義、ConversationContextManager |
 | `src/preload/index.ts` | IPC ブリッジ |
-| `src/renderer/renderer.ts` | メイン UI ロジック |
+| `src/renderer/renderer.ts` | 管理者ウィンドウ UI |
+| `src/renderer/admin.ts` | 管理機能（タブ切り替え、各種管理） |
 | `src/main/config/types.ts` | 設定の型定義 |
+| `src/main/config/autonomous.ts` | 自律行動の動的設定 |
 | `config/default.json` | デフォルト設定 |
 | `src/main/llm/router.ts` | LLM プロバイダ管理 |
 | `src/main/voice/voiceDialogueController.ts` | 音声対話制御 |
 | `src/main/memory/memoryManager.ts` | 記憶管理 |
+| `src/main/memory/discordUsers.ts` | Discord ユーザー管理 |
+| `src/main/discord/discordBot.ts` | Discord Bot（メイン UI） |
+| `src/main/events/ignoreDetector.ts` | 無視検出器 |
 
 ---
 
@@ -310,3 +335,32 @@ npm run dev
 4. [04-frontend-development.md](develop/04-frontend-development.md) - UI 開発
 5. [05-configuration-system.md](develop/05-configuration-system.md) - 設定管理
 6. [06-adding-new-events.md](develop/06-adding-new-events.md) - イベント追加
+7. [07-web-search-integration.md](develop/07-web-search-integration.md) - Web 検索機能
+
+---
+
+## 最近の大きな変更点
+
+### UI 構造の変更（2024年12月）
+
+- **メインウィンドウ → 管理者ウィンドウ** に変更
+  - タブ形式の管理 UI（記憶管理、ユーザー管理、LLM 設定、Discord、会話ログ）
+  - `admin.ts` で実装
+
+- **Discord が主要インターフェース** に
+  - テキストチャット：prefix コマンド + 常時会話
+  - 音声対話：VC での音声認識 → LLM → TTS 再生
+
+### 新機能
+
+- **Discord ユーザー管理**（`discordUsers.ts`）
+  - ユーザーの preferred name 設定
+  - メッセージ数や最終アクセス時刻の追跡
+
+- **ConversationContextManager**
+  - 多人数会話の文脈管理
+  - 発言者の識別とプロンプトへの反映
+
+- **IgnoreDetector**
+  - AI の発話後、ユーザーからの反応を監視
+  - 無視された場合のイベント発行

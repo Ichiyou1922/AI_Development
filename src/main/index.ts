@@ -419,6 +419,10 @@ async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string
                 }
 
                 mascotWindow?.getWindow()?.webContents.send('llm-done', { fullText });
+
+                // AIが返答したので無視検出タイマーを開始
+                voiceDialogue?.notifyAgentSpoke('discord');
+
                 resolve();
             },
             onError: (error) => {
@@ -599,6 +603,8 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
                     await discordStreamingTTS.onDone();
                     // 再生終了通知
                     mascotWindow?.getWindow()?.webContents.send('tts-state', { state: 'idle' });
+                    // AIが発話したので無視検出タイマーを開始
+                    voiceDialogue?.notifyAgentSpoke('discord');
                 }
 
                 resolve();

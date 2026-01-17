@@ -52,6 +52,11 @@ export const productionIdleConfig: IdleDetectorConfig = {
     checkIntervalMs: 60000,                 // 1分ごとにチェック
 };
 
+export const productionIgnoreConfig: IgnoreDetectorConfig = {
+    ignoreThresholdSeconds: 30,             // 30秒
+    checkIntervalMs: 10000,                  // 1分ごとにチェック
+};
+
 /**
  * テスト用設定
  */
@@ -72,11 +77,6 @@ export const testIdleConfig: IdleDetectorConfig = {
 export const testIgnoreConfig: IgnoreDetectorConfig = {
     ignoreThresholdSeconds: 10,             // 10秒
     checkIntervalMs: 5000,                  // 5秒ごとにチェック
-};
-
-export const productionIgnoreConfig: IgnoreDetectorConfig = {
-    ignoreThresholdSeconds: 300,             // 5分
-    checkIntervalMs: 60000,                  // 1分ごとにチェック
 };
 
 /**

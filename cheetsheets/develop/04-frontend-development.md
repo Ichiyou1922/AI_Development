@@ -18,10 +18,16 @@ flowchart TD
 
 ### 1.2 本プロジェクトのファイル構成
 
+> **重要な変更点**：UI 構造が大幅に変更されました。
+> - メインウィンドウ → **管理者ウィンドウ（Admin Window）** に変更
+> - 音声対話やチャットは **Discord が主要インターフェース** に
+> - マスコットウィンドウは常時表示のコンパニオンとして機能
+
 ```
 src/renderer/
-├── renderer.html     # メイン UI の HTML
-├── renderer.ts       # メイン UI のロジック
+├── renderer.html     # 管理者ウィンドウの HTML（タブ付きUI）
+├── renderer.ts       # 管理者ウィンドウの基本ロジック
+├── admin.ts          # 管理機能（タブ切り替え、各種管理UI）← 新規
 ├── mascot.html       # マスコットウィンドウの HTML
 ├── mascot.ts         # マスコットウィンドウのロジック
 ├── live2d.ts         # Live2D 描画処理
@@ -797,6 +803,205 @@ if (confirmed) {
 □ IPC（必要な場合）
   - Preload に expose されているか
   - Main にハンドラがあるか
+```
+
+---
+
+## 9. 管理者ウィンドウ（admin.ts）開発
+
+最新の更新で、メインウィンドウは**管理者ウィンドウ**として機能するようになりました。
+
+### 9.1 タブ構造
+
+```html
+<!-- 管理者ウィンドウのタブ構造 -->
+<div class="tab-buttons">
+    <button class="tab-btn active" data-tab="memory">記憶管理</button>
+    <button class="tab-btn" data-tab="users">ユーザー管理</button>
+    <button class="tab-btn" data-tab="llm">LLM設定</button>
+    <button class="tab-btn" data-tab="discord">Discord</button>
+    <button class="tab-btn" data-tab="logs">会話ログ</button>
+</div>
+
+<div id="tab-memory" class="tab-content active">...</div>
+<div id="tab-users" class="tab-content">...</div>
+<div id="tab-llm" class="tab-content">...</div>
+<div id="tab-discord" class="tab-content">...</div>
+<div id="tab-logs" class="tab-content">...</div>
+```
+
+### 9.2 タブ切り替えの実装
+
+```typescript
+// src/renderer/admin.ts
+
+const tabButtons = document.querySelectorAll('.tab-btn');
+const tabContents = document.querySelectorAll('.tab-content');
+
+tabButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+        const tabId = btn.getAttribute('data-tab');
+        if (!tabId) return;
+
+        // すべてのタブを非アクティブに
+        tabButtons.forEach(b => b.classList.remove('active'));
+        tabContents.forEach(c => c.classList.remove('active'));
+
+        // 選択したタブをアクティブに
+        btn.classList.add('active');
+        document.getElementById(`tab-${tabId}`)?.classList.add('active');
+
+        // タブ切り替え時にデータを更新
+        switch (tabId) {
+            case 'memory':
+                loadMemoryStats();
+                break;
+            case 'users':
+                loadUsersData();
+                break;
+            case 'llm':
+                loadLLMSettings();
+                break;
+            case 'discord':
+                loadDiscordStatus();
+                break;
+            case 'logs':
+                loadConversationList();
+                break;
+        }
+    });
+});
+```
+
+### 9.3 各タブの機能
+
+#### 記憶管理タブ
+
+```typescript
+// 記憶の統計を読み込み
+async function loadMemoryStats(): Promise<void> {
+    const stats = await window.electronAPI.memoryStats();
+    const count = await window.electronAPI.memoryCount();
+
+    document.getElementById('memory-count')!.textContent = String(count);
+    document.getElementById('memory-facts')!.textContent = String(stats.byType?.fact || 0);
+    // ...
+
+    const memories = await window.electronAPI.memoryGetAll();
+    renderMemoryList(memories);
+}
+
+// メンテナンス実行
+memoryMaintenanceBtn?.addEventListener('click', async () => {
+    const result = await window.electronAPI.memoryMaintenance();
+    alert(`メンテナンス完了: 圧縮 ${result.compressed}件, 削除 ${result.forgotten}件`);
+});
+```
+
+#### ユーザー管理タブ（新機能）
+
+```typescript
+// Discord ユーザー一覧を読み込み
+async function loadUsersData(): Promise<void> {
+    const stats = await window.electronAPI.discordUsersStats();
+    const users = await window.electronAPI.discordUsersGetAll();
+
+    document.getElementById('users-total')!.textContent = String(stats?.totalUsers || 0);
+    document.getElementById('users-named')!.textContent = String(stats?.namedUsers || 0);
+
+    renderUsersList(users || []);
+}
+
+function renderUsersList(users: any[]): void {
+    usersList.innerHTML = users.map(user => `
+        <div class="user-item">
+            <div class="user-header">
+                <span class="user-name">${escapeHtml(user.preferredName || user.displayName)}</span>
+                <span class="user-id">ID: ${user.discordId}</span>
+            </div>
+            <div class="user-meta">
+                メッセージ数: ${user.messageCount} |
+                最終: ${formatDate(user.lastSeen)}
+            </div>
+        </div>
+    `).join('');
+}
+```
+
+#### Discord 状態タブ
+
+```typescript
+async function loadDiscordStatus(): Promise<void> {
+    const status = await window.electronAPI.discordStatus();
+    const voiceStatus = await window.electronAPI.discordVoiceStatus();
+
+    // Bot 状態の表示
+    botStatusEl.textContent = status.available ? status.state : '未設定';
+    botStatusEl.className = `status-value ${status.state === 'ready' ? 'status-ok' : ''}`;
+
+    // VC 状態の表示
+    voiceEl.textContent = voiceStatus.connected ? '接続中' : '未接続';
+}
+```
+
+### 9.4 管理画面のスタイルパターン
+
+```css
+/* タブボタン */
+.tab-btn {
+    padding: 0.5rem 1rem;
+    background: transparent;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+}
+
+.tab-btn.active {
+    color: #fff;
+    border-bottom-color: #0d6efd;
+}
+
+/* タブコンテンツ */
+.tab-content {
+    display: none;
+    padding: 1rem;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* データ表示カード */
+.stat-card {
+    background: #2d2d2d;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #0d6efd;
+}
+
+/* リストアイテム */
+.user-item, .memory-item {
+    background: #252525;
+    border-radius: 4px;
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+/* ステータス表示 */
+.status-ok {
+    color: #28a745;
+}
+
+.status-error {
+    color: #dc3545;
+}
 ```
 
 ## 関連ドキュメント
