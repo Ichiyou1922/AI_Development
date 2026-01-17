@@ -135,22 +135,43 @@ export class DiscordBot extends EventEmitter {
         const hasPrefix = this.config.prefix &&
             message.content.startsWith(this.config.prefix);
 
-        if (!isMentioned && !hasPrefix) return;
-
+        let content = message.content;
+        //if (!isMentioned && !hasPrefix) return;
+        if (hasPrefix) {
+            content = content.slice(this.config.prefix!.length).trim();
+            if(content.startsWith('!callme ')) {
+                const name = content.slice(8).trim();
+                if (name.length > 0 && name.length <=20) {
+                    this.setUserName(message.author.id, name);
+                    await message.reply(`これからは「${name}」とお呼びします！`);
+                } else {
+                    await message.reply('名前の設定に失敗しました。');
+                    await message.reply('名前は1〜20文字で指定してください。');
+                }
+                return;
+            } else if (content === 'whoami!' || content.startsWith('!whoami')) {
+                const name = this.getUserName(message.author.id);
+                const displayName = message.author.displayName;
+                if (name) {
+                    await message.reply(`現在は「${name}」として認識しています。（Discord表示名: ${displayName}）`);
+                } else {
+                    await message.reply(`まだ呼び名は設定されていません。「${displayName}」とお呼びします。\n` +
+                        `変更したい場合は \`!ai !callme [名前]\` と入力してください。`);
+                }
+                return;
+            } 
+        } else {
+                content = content;
+        }
+        /* 
         // メッセージ内容を抽出（メンションやプレフィックスを除去）
         let content = message.content;
-        if (isMentioned) {
-            content = content.replace(/<@!?\d+>/g, '').trim();
-        }
-        if (hasPrefix && this.config.prefix) {
-            content = content.slice(this.config.prefix.length).trim();
-        }
-
+        
         if (!content) return;
 
         // コマンド処理: !callme (呼び名設定)
-        if (content.startsWith('!callme ')) {
-            const name = content.slice(8).trim();
+        if (hasPrefix && content === '!callme ') {
+            const name = content.slice(11).trim();
             if (name.length > 0 && name.length <= 20) {
                 if (this.setUserName(message.author.id, name)) {
                     await message.reply(`これからは「${name}」とお呼びします！`);
@@ -164,7 +185,7 @@ export class DiscordBot extends EventEmitter {
         }
 
         // コマンド処理: !whoami (登録名確認)
-        if (content === '!whoami') {
+        if (hasPrefix && content === '!whoami') {
             const name = this.getUserName(message.author.id);
             const displayName = message.author.displayName;
             if (name) {
@@ -175,6 +196,15 @@ export class DiscordBot extends EventEmitter {
             }
             return;
         }
+
+        //if (isMentioned) {
+        //    content = content.replace(/<@!?\d+>/g, '').trim();
+        //}
+        if (!hasPrefix && !isMentioned) {
+            content = content;//content.slice(this.config.prefix.length).trim();
+        }
+        */
+
 
         // ユーザー情報を記録・取得
         this.userManager.recordUser(message.author.id, message.author.displayName);
