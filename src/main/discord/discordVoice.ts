@@ -252,7 +252,7 @@ export class DiscordVoice extends EventEmitter {
         // 少し待ってからフラッシュ（連続発話を結合）
         const timer = setTimeout(async () => {
             await this.flushUserAudio(userId);
-        }, 800);  // 500 → 800ms に延長
+        }, 500);  // 500ms に延長
 
         this.userSilenceTimers.set(userId, timer);
     }
@@ -403,7 +403,7 @@ export class DiscordVoice extends EventEmitter {
             });
 
             // 再生終了後、少し待ってからリスニング再開（エコー防止）
-            await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+            await new Promise<void>((resolve) => setTimeout(resolve, 500)); // エコー発生なら1000くらいに
 
         } finally {
             // 一時ファイル削除

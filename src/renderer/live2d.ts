@@ -219,7 +219,8 @@ function detectEmotionFromText(text: string): EmotionType {
         '😢': 'sad', '😭': 'sad', '😥': 'sad', '😓': 'sad', '😞': 'sad', '😖': 'sad', '😣': 'sad', '😩': 'sad', '😫': 'sad', '😿': 'sad', '💔': 'sad', '💧': 'sad',
         '😲': 'surprised', '😮': 'surprised', '😯': 'surprised', '😦': 'surprised', '😧': 'surprised', '😨': 'surprised', '😱': 'surprised',
         '😊': 'happy', '😄': 'happy', '😃': 'happy', '😀': 'happy', '😁': 'happy', '😆': 'happy', '🤣': 'happy', '😂': 'happy', '🥰': 'happy', '😍': 'happy', '🤩': 'happy', '🥳': 'happy', '🤗': 'happy', '😻': 'happy', '🎉': 'happy', '✨': 'happy', '❤️': 'happy', '♥️': 'happy', '👍': 'happy',
-        '🤔': 'thinking', '🤨': 'thinking', '🧐': 'thinking'
+        '🤔': 'thinking', '🤨': 'thinking', '🧐': 'thinking', '...': 'thinking', '…': 'thinking', '......': 'thinking', '？': 'thinking', '？？？': 'thinking',
+        '？？？？？': 'thinking',
     };
 
     let lastIndex = -1;

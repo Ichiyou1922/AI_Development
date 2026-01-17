@@ -160,9 +160,7 @@ export class ScreenRecognitionController extends EventEmitter {
         if (details.videoTitle && details.siteName === 'YouTube') {
             return {
                 type: 'youtube_detected',
-                prompt: `ユーザーがYouTubeで「${details.videoTitle}」を見始めました。
-興味を持った短い一言コメントを生成してください。
-押し付けがましくなく、30文字以内で。`,
+                prompt: `ユーザーがYouTubeで「${details.videoTitle}」を見始めました。プロンプトの設定に基づいた反応をしてください。`,
                 defaultMessage: `「${details.videoTitle.substring(0, 20)}...」面白そう！`,
             };
         }
@@ -171,8 +169,7 @@ export class ScreenRecognitionController extends EventEmitter {
         if (category === 'game') {
             return {
                 type: 'game_detected',
-                prompt: `ユーザーがゲーム（${app}）を起動しました。
-楽しんでねという短い一言を生成してください。30文字以内で。`,
+                prompt: `ユーザーがゲーム（${app}）を起動しました。プロンプトの設定に基づいた反応をしてください。`,
                 defaultMessage: 'ゲーム楽しんでね！',
             };
         }
@@ -183,8 +180,7 @@ export class ScreenRecognitionController extends EventEmitter {
             if (interestingSites.some(s => details.siteName?.includes(s))) {
                 return {
                     type: 'dev_site_detected',
-                    prompt: `ユーザーが${details.siteName}を見ています。
-開発者向けの短い励ましの一言を生成してください。30文字以内で。`,
+                    prompt: `ユーザーが${details.siteName}を見ています。プロンプトの設定に基づいた反応をしてください。`,
                     defaultMessage: `${details.siteName}で調べ物？頑張ってるね！`,
                 };
             }
@@ -200,9 +196,8 @@ export class ScreenRecognitionController extends EventEmitter {
         if (!this.llmVisionHandler) return;
 
         try {
-            const prompt = `この画面のスクリーンショットを見て、ユーザーが何をしているか簡潔に説明してください。
-プライバシーに配慮し、具体的な個人情報は含めないでください。
-50文字以内で。`;
+            const prompt = `この画面のスクリーンショットを見て、ユーザーが何をしているか簡潔に説明してください。プライバシーに配慮し、具体的な個人情報は含めないでください。
+            プロンプトの設定に基づいた反応をしてください。`;
 
             const analysis = await this.llmVisionHandler(imageBase64, prompt);
 
@@ -230,7 +225,8 @@ export class ScreenRecognitionController extends EventEmitter {
         const base64 = await screenshotCapture.captureAsBase64();
         if (!base64 || !this.llmVisionHandler) return null;
 
-        const prompt = `この画面を見て、ユーザーの作業内容を簡潔に説明してください。100文字以内で。`;
+        const prompt = `この画面を見て、ユーザーの作業内容を簡潔に説明してください。プライバシーに配慮し、具体的な個人情報は含めないでください。
+        プロンプトの設定に基づいた反応をしてください。`;
         return await this.llmVisionHandler(base64, prompt);
     }
 
