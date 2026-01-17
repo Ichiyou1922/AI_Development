@@ -140,6 +140,34 @@ export class DiscordBot extends EventEmitter {
 
         if (!content) return;
 
+        // コマンド処理: !callme (呼び名設定)
+        if (content.startsWith('!callme ')) {
+            const name = content.slice(8).trim();
+            if (name.length > 0 && name.length <= 20) {
+                if (this.setUserName(message.author.id, name)) {
+                    await message.reply(`これからは「${name}」とお呼びします！`);
+                } else {
+                    await message.reply('名前の設定に失敗しました。');
+                }
+            } else {
+                await message.reply('名前は1〜20文字で指定してください。');
+            }
+            return;
+        }
+
+        // コマンド処理: !whoami (登録名確認)
+        if (content === '!whoami') {
+            const name = this.getUserName(message.author.id);
+            const displayName = message.author.displayName;
+            if (name) {
+                await message.reply(`現在は「${name}」として認識しています。（Discord表示名: ${displayName}）`);
+            } else {
+                await message.reply(`まだ呼び名は設定されていません。「${displayName}」とお呼びします。\n` +
+                    `変更したい場合は \`!ai !callme [名前]\` と入力してください。`);
+            }
+            return;
+        }
+
         // ユーザー情報を記録・取得
         this.userManager.recordUser(message.author.id, message.author.displayName);
         const displayName = this.userManager.getName(message.author.id);

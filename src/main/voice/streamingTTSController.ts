@@ -184,7 +184,10 @@ export class StreamingTTSController extends EventEmitter {
 
         // 並列実行ではなく、チェーンして直列実行する
         // これにより順序保証と負荷分散を行う
-        const task = () => this.synthesizeAndQueue(text, index);
+        const task = async () => {
+            console.log(`[StreamingTTS] Chain processing sentence ${index}: "${text.substring(0, 15)}..."`);
+            await this.synthesizeAndQueue(text, index);
+        };
 
         // チェーンに追加
         this.synthesisChain = this.synthesisChain.then(task).catch(() => {

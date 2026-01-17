@@ -199,7 +199,7 @@ function getProjectRoot(): string {
     if (app && app.isPackaged) {
         return path.dirname(app.getAppPath());
     }
-    // dist/main/config/configLoader.js から見て 3階層上がプロジェクトルート
+    // dist/main/config/configLoader.js から見て 3階層上がプロジェクトルート->二階層に修正
     return path.resolve(__dirname, '../../');
 }
 

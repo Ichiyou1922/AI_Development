@@ -224,7 +224,7 @@ export class VoiceDialogueController extends EventEmitter {
             } else {
                 this.setState('idle');
             }
-        }, 2000); // 5秒待機 もっと長くしないとだめか
+        }, 500); // 0.5秒待機 もっと長くしないとだめか
     }
 
     /**

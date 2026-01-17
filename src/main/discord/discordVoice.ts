@@ -17,6 +17,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { IdentifiedAudio, VoiceChannelInfo, VoiceChannelMember } from './types.js';
 import * as prism from 'prism-media';
+import { getDiscordUserManager } from '../memory/discordUsers.js';
 
 /**
  * Discord音声チャンネル管理クラス
@@ -306,6 +307,17 @@ export class DiscordVoice extends EventEmitter {
             }
         } catch (error) {
             console.error('[DiscordVoice] Failed to fetch username:', error);
+        }
+
+        // 登録済みの呼び名があれば優先して使用
+        const userManager = getDiscordUserManager();
+        // ユーザー情報を更新（最終確認時刻などを更新）
+        userManager.recordUser(userId, username);
+
+        // 設定された呼び名を取得
+        const preferredName = userManager.getName(userId);
+        if (preferredName) {
+            username = preferredName;
         }
 
         // PCMに変換（リサンプリング）

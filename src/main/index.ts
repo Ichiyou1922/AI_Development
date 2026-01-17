@@ -205,6 +205,7 @@ async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string
     // AIの名前を追加（言語モデルが自分の名前を間違えないように）
     const aiName = config.prompts.character.name;
     systemPromptParts.push(`\n\n【あなたの名前】\nあなたの名前は「${aiName}」です。自分の名前を聞かれたら「${aiName}」と答えてください。`);
+    systemPromptParts.push(`\n名前と一人称（私、僕など）を明確に区別してください。「私」は名前ではありません。`);
 
     // 発言者情報を追加
     const speakerName = ctx.displayName || ctx.username;
@@ -328,6 +329,7 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
     // AIの名前を追加（言語モデルが自分の名前を間違えないように）
     const aiName = config.prompts.character.name;
     systemPromptParts.push(`\n\n【あなたの名前】\nあなたの名前は「${aiName}」です。自分の名前を聞かれたら「${aiName}」と答えてください。`);
+    systemPromptParts.push(`\n名前と一人称（私、僕など）を明確に区別してください。「私」は名前ではありません。`);
 
     // 発言者情報を追加
     systemPromptParts.push(`\n\n【現在の発言者】\n${userContext}`);
