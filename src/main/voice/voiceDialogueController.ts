@@ -3,6 +3,8 @@ import { MicrophoneCapture } from './microphoneCapture.js';
 import { STTProvider } from './types.js';
 import { VoicevoxProvider } from './voicevoxProvider.js';
 import { AudioPlayer } from './audioPlayer.js';
+import { eventBus, EventPriority } from '../events/index.js';
+import { getIgnoreDetectorConfig } from '../config/index.js';
 
 /**
  * 音声対話の状態
@@ -38,6 +40,10 @@ export class VoiceDialogueController extends EventEmitter {
     private state: DialogueState = 'idle';
     private isActive: boolean = false;
     private autoListen: boolean = true;  // TTS後に自動でリスニング再開
+    private ignoreTimer: NodeJS.Timeout | null = null;
+    private hasSpoken: boolean = false;  // AIが発話した直後か（無視判定用）
+    private ignoreCount: number = 0; // 無視された回数
+    private lastInteractionSource: 'voice' | 'discord' = 'voice'; // 最後の対話ソース
 
     // 外部から注入されるLLM処理関数
     private llmHandler: ((text: string) => Promise<string>) | null = null;
@@ -114,6 +120,7 @@ export class VoiceDialogueController extends EventEmitter {
     stop(): void {
         console.log('[VoiceDialogue] Stopping voice dialogue');
         this.isActive = false;
+        this.notifyUserActive();
         this.micCapture.stop();
         this.audioPlayer.stop();
         this.setState('idle');
@@ -125,6 +132,9 @@ export class VoiceDialogueController extends EventEmitter {
     interrupt(): void {
         if (this.state === 'speaking') {
             console.log('[VoiceDialogue] Interrupted');
+            console.log('[VoiceDialogue] Interrupted');
+
+            this.notifyUserActive();
             this.audioPlayer.stop();
             this.setState('listening');
             this.micCapture.startListening();
@@ -143,6 +153,10 @@ export class VoiceDialogueController extends EventEmitter {
      */
     private async handleAudioCapture(audioBuffer: Buffer): Promise<void> {
         if (!this.isActive) return;
+
+        // 音声が入ったらタイマー停止
+        this.lastInteractionSource = 'voice';
+        this.notifyUserActive();
 
         // 発話中の音声入力は無視（エコーバック防止）
         if (this.state === 'speaking') {
@@ -198,6 +212,7 @@ export class VoiceDialogueController extends EventEmitter {
 
         try {
             this.setState('speaking');
+            this.hasSpoken = true; // 発話フラグセット
             const audioBuffer = await this.voicevox.synthesize(text);
             await this.audioPlayer.play(audioBuffer);
         } catch (error) {
@@ -224,7 +239,7 @@ export class VoiceDialogueController extends EventEmitter {
             } else {
                 this.setState('idle');
             }
-        }, 500); // 0.5秒待機 もっと長くしないとだめか
+        }, 500); // 0.5秒待機
     }
 
     /**
@@ -234,6 +249,82 @@ export class VoiceDialogueController extends EventEmitter {
         if (this.isActive) {
             this.setState('listening');
             this.micCapture.startListening();
+
+            // AIが発話した後のリスニングなら無視タイマー開始
+            if (this.hasSpoken) {
+                this.startIgnoreTimer();
+            }
+        }
+    }
+
+    /**
+     * AIが発言したことを通知（外部からの呼び出し用）
+     * 無視監視タイマーを開始する
+     * @param source 発話ソース ('voice' | 'discord')
+     */
+    notifyAgentSpoke(source: 'voice' | 'discord' = 'voice'): void {
+        this.hasSpoken = true;
+        this.lastInteractionSource = source;
+        this.startIgnoreTimer();
+    }
+
+    /**
+     * ユーザーがアクティブであることを通知（外部からの呼び出し用）
+     * 無視監視タイマーを停止する
+     */
+    notifyUserActive(): void {
+        this.stopIgnoreTimer();
+        this.hasSpoken = false;
+        this.ignoreCount = 0; // アクティブならリセット
+    }
+
+    /**
+     * 無視監視タイマーを開始
+     */
+    private startIgnoreTimer(): void {
+        this.stopIgnoreTimer();
+        const config = getIgnoreDetectorConfig();
+
+        console.log(`[VoiceDialogue] Starting ignore timer (${config.ignoreThresholdSeconds}s)`);
+
+        this.ignoreTimer = setTimeout(() => {
+            console.log('[VoiceDialogue] User ignore detected');
+
+            // 毎回反応するとうるさいので、30%の確率でのみ反応する
+            if (Math.random() > 0.3) {
+                console.log('[VoiceDialogue] Skipping ignore reaction (random check)');
+                this.hasSpoken = false; // 反応しなくてもフラグはリセット
+                return;
+            }
+
+            this.hasSpoken = false; // 一度無視イベントを出したらリセット
+            this.ignoreCount++;
+
+            // 無視が3回以上続いたらイベントを発行しない（無限ループ防止）
+            if (this.ignoreCount > 2) {
+                console.log('[VoiceDialogue] Ignore limit reached, skipping event');
+                return;
+            }
+
+            eventBus.publish({
+                type: 'user:ignoring',
+                priority: EventPriority.HIGH,
+                timestamp: Date.now(),
+                data: {
+                    ignoreTime: config.ignoreThresholdSeconds,
+                    source: this.lastInteractionSource // ソースを通知
+                }
+            } as any);
+        }, config.ignoreThresholdSeconds * 1000);
+    }
+
+    /**
+     * 無視監視タイマーを停止
+     */
+    private stopIgnoreTimer(): void {
+        if (this.ignoreTimer) {
+            clearTimeout(this.ignoreTimer);
+            this.ignoreTimer = null;
         }
     }
 

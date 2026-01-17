@@ -24,6 +24,17 @@ export interface IdleDetectorConfig {
     checkIntervalMs: number;
 }
 
+export interface IgnoreDetectorConfig {
+    /**
+     * 無視するイベントの閾値（秒）
+     */
+    ignoreThresholdSeconds: number;
+    /**
+     * チェック間隔（ミリ秒）
+     */
+    checkIntervalMs: number;
+}
+
 /**
  * 本番用設定
  */
@@ -58,6 +69,16 @@ export const testIdleConfig: IdleDetectorConfig = {
     checkIntervalMs: 5000,                  // 5秒ごとにチェック
 };
 
+export const testIgnoreConfig: IgnoreDetectorConfig = {
+    ignoreThresholdSeconds: 10,             // 10秒
+    checkIntervalMs: 5000,                  // 5秒ごとにチェック
+};
+
+export const productionIgnoreConfig: IgnoreDetectorConfig = {
+    ignoreThresholdSeconds: 300,             // 5分
+    checkIntervalMs: 60000,                  // 1分ごとにチェック
+};
+
 /**
  * 環境に応じた設定を取得
  * NODE_ENV=test または AUTONOMOUS_TEST=true でテスト設定を使用
@@ -70,4 +91,9 @@ export function getAutonomousConfig(): AutonomousConfig {
 export function getIdleDetectorConfig(): IdleDetectorConfig {
     const isTest = process.env.NODE_ENV === 'test' || process.env.AUTONOMOUS_TEST === 'true';
     return isTest ? testIdleConfig : productionIdleConfig;
+}
+
+export function getIgnoreDetectorConfig(): IgnoreDetectorConfig {
+    const isTest = process.env.NODE_ENV === 'test' || process.env.AUTONOMOUS_TEST === 'true';
+    return isTest ? testIgnoreConfig : productionIgnoreConfig;
 }

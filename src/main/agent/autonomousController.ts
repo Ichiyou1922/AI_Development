@@ -30,7 +30,9 @@ export interface SituationContext {
         url?: string;
     };
     /** トリガーとなったイベント */
-    trigger: 'idle' | 'active' | 'timer' | 'screen_change';
+    trigger: 'idle' | 'active' | 'timer' | 'screen_change' | 'ignoring';
+    /** イベントソース */
+    source?: 'voice' | 'discord';
     /** 追加メモ */
     note?: string;
 }
@@ -107,6 +109,11 @@ export class AutonomousController extends EventEmitter {
                 this.checkAndAct();
             }
         }, EventPriority.NORMAL);
+
+        // 無視イベント
+        eventBus.register('user:ignoring', (event) => {
+            this.handleIgnoring(event);
+        }, EventPriority.HIGH);
     }
 
     /**
@@ -203,6 +210,20 @@ export class AutonomousController extends EventEmitter {
         }
     }
 
+
+    /**
+     * 無視された時の処理（いじける）
+     */
+    private handleIgnoring(event: AgentEvent): void {
+        console.log('[Autonomous] User ignored the AI');
+        const source = (event.data as any)?.source;
+        const context = this.buildContext('ignoring', {
+            note: 'ユーザーに話しかけたが無視された',
+            source: source
+        });
+        this.trySpeak(context);
+    }
+
     // ... (skip) ...
 
     /**
@@ -251,7 +272,7 @@ export class AutonomousController extends EventEmitter {
      */
     async handleScreenChange(screenInfo: { app?: string; title?: string; url?: string }): Promise<void> {
         if (!this.config.enabled) return;
-        if (!this.canAct()) return;
+        // canAct check is done inside trySpeak with trigger info
 
         const context = this.buildContext('screen_change', { screenInfo });
         await this.trySpeak(context);
@@ -308,7 +329,7 @@ export class AutonomousController extends EventEmitter {
     private async trySpeak(context: SituationContext): Promise<void> {
         console.log(`[Autonomous] trySpeak called with trigger: ${context.trigger}`);
 
-        if (!this.canAct()) {
+        if (!this.canAct(context.trigger)) {
             const elapsed = Date.now() - this.lastActionTime;
             console.log(`[Autonomous] Speech suppressed (rate limit). Elapsed: ${elapsed}ms, Required: ${this.config.minIntervalMs}ms, DailyCount: ${this.dailyActionCount}/${this.config.maxDailyActions}`);
             return;
@@ -335,14 +356,33 @@ export class AutonomousController extends EventEmitter {
 
             console.log(`[Autonomous] Speaking: ${message.substring(0, 50)}...`);
 
-            // Discordにも送信
-            if (this.discordHandler) {
+            // モード判定: 音声モードでの無視ならDiscordには送らずローカルで発話
+            const isVoiceIgnore = context.trigger === 'ignoring' && context.source === 'voice';
+
+            if (isVoiceIgnore) {
+                // ローカルで発話（Rendererプロセスへ通知 -> TTS）
+                console.log('[Autonomous] Speaking locally (Voice Mode Ignore)');
+                this.emit('action', {
+                    type: 'speak',
+                    message,
+                    context
+                });
+            } else if (this.discordHandler) {
+                // Discordへ送信 (チャットモード or アイドル発話など)
                 try {
                     await this.discordHandler(message);
                     console.log('[Autonomous] Message sent to Discord');
                 } catch (error) {
                     console.error('[Autonomous] Discord send failed:', error);
+                    // 失敗時はローカルで喋る？ いったんログのみ
                 }
+            } else {
+                // Discordハンドラがない場合もローカルで
+                this.emit('action', {
+                    type: 'speak',
+                    message,
+                    context
+                });
             }
         } finally {
             // 必ずフラグを解除
@@ -353,7 +393,7 @@ export class AutonomousController extends EventEmitter {
     /**
      * アクション実行可能かチェック
      */
-    private canAct(): boolean {
+    private canAct(trigger?: SituationContext['trigger']): boolean {
         if (!this.config.enabled) return false;
 
         // AIが喋っている場合はアクションしない
@@ -361,6 +401,16 @@ export class AutonomousController extends EventEmitter {
             return false;
         }
 
+        // リアクティブなトリガー（反応動作）は回数制限の対象外
+        // - ignoring: ユーザーに無視された時の反応
+        // - screen_change: 画面変化への反応
+        // - active: 戻ってきた時の挨拶
+        const reactiveTriggers: SituationContext['trigger'][] = ['ignoring', 'screen_change', 'active'];
+        if (trigger && reactiveTriggers.includes(trigger)) {
+            return true;
+        }
+
+        // プロアクティブな行動のみ制限
         if (this.dailyActionCount >= this.config.maxDailyActions) {
             return false;
         }
@@ -447,6 +497,11 @@ export class AutonomousController extends EventEmitter {
                     }
                 }
                 break;
+
+            case 'ignoring':
+                parts.push(`状況: あなたの発言に対してユーザーからの反応がありません（無視されました）`);
+                parts.push('指示: 少し「いじけた」態度をとってください。「もう知らない」「プイッ」などの表現や、寂しそうな反応をしてください。');
+                break;
         }
 
         if (context.note) {
@@ -504,6 +559,12 @@ export class AutonomousController extends EventEmitter {
                 'へー、何見てるの？',
                 'ふーん',
                 '面白そう',
+            ],
+            ignoring: [
+                '……',
+                'もう知らない！',
+                'プイッ',
+                'ねえ、聞いてる？',
             ],
         };
 

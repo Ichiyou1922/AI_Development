@@ -32,6 +32,9 @@ export class DiscordBot extends EventEmitter {
     // 外部から注入されるメッセージ処理関数
     private messageHandler: ((ctx: DiscordMessageContext) => Promise<string>) | null = null;
 
+    // 最後にアクティブだったチャンネル
+    private lastActiveChannelId: string | null = null;
+
     constructor(config: DiscordBotConfig) {
         super();
         this.config = config;
@@ -89,11 +92,15 @@ export class DiscordBot extends EventEmitter {
         if (message.author.bot) return;
 
         // チャンネル制限がある場合はチェック
+        // チャンネル制限がある場合はチェック
         if (this.config.allowedChannels &&
             this.config.allowedChannels.length > 0 &&
             !this.config.allowedChannels.includes(message.channelId)) {
             return;
         }
+
+        // アクティブなチャンネルを更新
+        this.lastActiveChannelId = message.channelId;
 
         // コマンド処理: !join
         if (message.content === '!join') {
@@ -429,13 +436,18 @@ export class DiscordBot extends EventEmitter {
             speakInVoice?: boolean;  // 音声チャンネルでも発話するか（デフォルト: true）
         }
     ): Promise<void> {
-        const { channelId, speakInVoice = true } = options ?? {};
+        const { speakInVoice = true } = options ?? {};
+
+        // チャンネルIDの決定: 指定 > 最新のアクティブチャンネル > 許可リストの最初
+        const targetChannelId = options?.channelId ??
+            this.lastActiveChannelId ??
+            this.config.allowedChannels?.[0];
 
         // テキストチャンネルに送信
-        if (channelId) {
+        if (targetChannelId) {
             try {
-                await this.sendMessage(channelId, message);
-                console.log(`[DiscordBot] Autonomous message sent to channel ${channelId}`);
+                await this.sendMessage(targetChannelId, message);
+                console.log(`[DiscordBot] Autonomous message sent to channel ${targetChannelId}`);
             } catch (error) {
                 console.error('[DiscordBot] Failed to send autonomous message:', error);
             }

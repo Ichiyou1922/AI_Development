@@ -80,7 +80,7 @@ cleanup() {
 # Ctrl+C を捕捉
 trap cleanup SIGINT SIGTERM
 
-# アプリ起動
-npm start
+# アプリ起動（ウォッチモード）
+npm run dev:watch
 
 cleanup

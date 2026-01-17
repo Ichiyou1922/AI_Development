@@ -19,6 +19,7 @@ export type EventType =
     | 'system:lowBattery'   // バッテリー低下
     | 'user:greeting'       // 挨拶トリガー
     | 'user:reminder'       // リマインダー
+    | 'user:ignoring'       // 無視検出
     | 'custom';             // カスタムイベント
 
 /**
@@ -47,10 +48,12 @@ export interface TimerEvent extends BaseEvent {
  * システムイベント
  */
 export interface SystemEvent extends BaseEvent {
-    type: 'system:idle' | 'system:active' | 'system:lowBattery';
+    type: 'system:idle' | 'system:active' | 'system:lowBattery' | 'user:ignoring';
     data: {
         idleTime?: number;      // アイドル時間（秒）
+        ignoreTime?: number;    // 無視時間（秒）
         batteryLevel?: number;  // バッテリー残量（%）
+        source?: 'voice' | 'discord'; // 無視イベントのソース
     };
 }
 

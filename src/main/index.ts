@@ -28,8 +28,8 @@ import {
 } from './events/index.js';
 import { autonomousController } from './agent/index.js';
 // 設定システム
-import { initConfig, config, getIdleDetectorConfig } from './config/index.js';
-import { screenshotCapture, ScreenContext, screenRecognitionController } from './screen/index.js';
+import { initConfig, config, getIdleDetectorConfig, getIgnoreDetectorConfig } from './config/index.js';
+import { screenshotCapture, ScreenContext, screenRecognitionController, activeWindowMonitor } from './screen/index.js';
 import { AlwaysOnListener, ListenerConfig } from './mascot/alwaysOnListener.js';
 import { STTRouter } from './voice/sttRouter.js';
 
@@ -166,6 +166,9 @@ async function processVoiceMessage(userText: string): Promise<string> {
 }
 
 async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string> {
+    // ユーザーからのメッセージがあったので無視判定タイマーをリセット
+    voiceDialogue?.notifyUserActive();
+
     // デバッグログ
     console.log('[Discord] Message context:', {
         userId: ctx.userId,
@@ -1092,40 +1095,39 @@ app.whenReady().then(async () => {
 
     // 音声対話コントローラの初期化 - 無効化（Discord専用に変更）
     // メインウィンドウはテキストチャットのみ、音声機能はDiscord/マスコットウィンドウで使用
-    /*
-    if (voiceEnabled && ttsEnabled) {
-        voiceDialogue = new VoiceDialogueController(
-            microphoneCapture,
-            sttRouter,
-            voicevoxProvider,
-            audioPlayer,
-        );
+    // 音声対話コントローラの初期化 - (Discord連携のために有効化)
+    // if (voiceEnabled && ttsEnabled) {
+    voiceDialogue = new VoiceDialogueController(
+        microphoneCapture,
+        sttRouter,
+        voicevoxProvider,
+        audioPlayer,
+    );
 
-        // LLMハンドラー設定
-        voiceDialogue.setLLMHandler(async (userText: string) => {
-            return await processVoiceMessage(userText);
-        });
+    // LLMハンドラー設定
+    voiceDialogue.setLLMHandler(async (userText: string) => {
+        return await processVoiceMessage(userText);
+    });
 
-        // Rendererに音声認識結果を送信
-        voiceDialogue.on('stateChange', (state: DialogueState) => {
-            mainWindow?.webContents.send('voice-dialogue-state', { state });
-        });
+    // Rendererに音声認識結果を送信
+    voiceDialogue.on('stateChange', (state: DialogueState) => {
+        mainWindow?.webContents.send('voice-dialogue-state', { state });
+    });
 
-        voiceDialogue.on('userSpeech', (text: string) => {
-            mainWindow?.webContents.send('dialogue-user-speech', { text });
-        });
+    voiceDialogue.on('userSpeech', (text: string) => {
+        mainWindow?.webContents.send('dialogue-user-speech', { text });
+    });
 
-        voiceDialogue.on('assistantResponse', (text: string) => {
-            mainWindow?.webContents.send('dialogue-assistant-response', { text });
-        });
+    voiceDialogue.on('assistantResponse', (text: string) => {
+        mainWindow?.webContents.send('dialogue-assistant-response', { text });
+    });
 
-        voiceDialogue.on('error', (error: string) => {
-            mainWindow?.webContents.send('dialogue-error', { error });
-        });
+    voiceDialogue.on('error', (error: string) => {
+        mainWindow?.webContents.send('dialogue-error', { error });
+    });
 
-        console.log('[App] Voice dialogue controller initialized');
-    }
-    */
+    console.log('[App] Voice dialogue controller initialized');
+    // }
     console.log('[App] Main window: Text chat only (voice disabled)');
 
     // Discord Botの初期化
@@ -1316,7 +1318,11 @@ app.whenReady().then(async () => {
         // TTSが有効なら読み上げ
         if (ttsEnabled && data.message) {
             voicevoxProvider.synthesize(data.message)
-                .then(audio => audioPlayer.play(audio))
+                .then(audio => {
+                    audioPlayer.play(audio);
+                    // 音声対話コントローラに通知（無視検出タイマー開始、ソース=voice）
+                    voiceDialogue?.notifyAgentSpoke('voice');
+                })
                 .catch(err => console.error('[Autonomous] TTS failed:', err));
         }
     });
@@ -1332,10 +1338,11 @@ app.whenReady().then(async () => {
         autonomousController.setDiscordHandler(async (message: string, options?: { channelId?: string }) => {
             if (!discordBot) return;
 
-            // チャンネルIDが指定されていない場合、設定されたチャンネルの最初を使用
-            const channelId = options?.channelId ?? discordBot.getAllowedChannels()?.[0];
+            // チャンネルIDはDiscordBot側で適切に解決させる（指定がなければ最後のアクティブチャンネル）
+            await discordBot.sendAutonomousMessage(message, { channelId: options?.channelId });
 
-            await discordBot.sendAutonomousMessage(message, { channelId });
+            // 自律発話を行ったので無視判定タイマーを開始（ソース=discord）
+            voiceDialogue?.notifyAgentSpoke('discord');
         });
 
         // Discord音声チャンネルでの自律発話TTS
@@ -1512,9 +1519,29 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', async () => {
+    console.log('[App] Stopping background services...');
+
+    // イベント発生源を停止
+    idleDetector.stop();
+    timerTrigger.stopAll();
+
+    // 監視系を停止
+    activeWindowMonitor.stop();
+    screenRecognitionController.stop();
+
+    if (voiceDialogue) {
+        voiceDialogue.stop();
+    }
+
+    if (microphoneCapture) {
+        microphoneCapture.stop();
+    }
+
     if (discordBot) {
         await discordBot.stop();
     }
+
+    console.log('[App] Cleanup complete');
 });
 
 app.on('window-all-closed', () => {

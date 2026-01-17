@@ -29,7 +29,8 @@ cheetsheets/
     ├── 02-adding-new-features.md
     ├── 03-ipc-handler-development.md
     ├── 04-frontend-development.md
-    └── 05-configuration-system.md
+    ├── 05-configuration-system.md
+    └── 06-adding-new-events.md
 ```
 
 ---
@@ -129,6 +130,14 @@ cheetsheets/
 - 新しい設定項目の追加手順
 - 環境変数の使い方
 - 動的な設定更新
+
+### [06-adding-new-events.md](develop/06-adding-new-events.md)
+**新イベント追加ガイド**
+
+- イベント駆動アーキテクチャの概要
+- 型定義から実装までの詳細ステップ
+- 自律行動（AutonomousController）への統合
+- 実践例：無視イベントの実装
 
 ---
 
@@ -300,3 +309,4 @@ npm run dev
 3. [03-ipc-handler-development.md](develop/03-ipc-handler-development.md) - IPC 開発
 4. [04-frontend-development.md](develop/04-frontend-development.md) - UI 開発
 5. [05-configuration-system.md](develop/05-configuration-system.md) - 設定管理
+6. [06-adding-new-events.md](develop/06-adding-new-events.md) - イベント追加

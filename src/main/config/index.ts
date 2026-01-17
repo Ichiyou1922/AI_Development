@@ -55,4 +55,8 @@ export {
     testIdleConfig,
     getAutonomousConfig,
     getIdleDetectorConfig,
+    IgnoreDetectorConfig,
+    productionIgnoreConfig,
+    testIgnoreConfig,
+    getIgnoreDetectorConfig,
 } from './autonomous.js';
