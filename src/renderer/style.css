@@ -401,3 +401,488 @@ body {
         opacity: 1;
     }
 }
+
+/* ============================================================
+   管理モード用スタイル
+   ============================================================ */
+
+.admin-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: #1a1a2e;
+}
+
+/* ヘッダー */
+.admin-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 24px;
+    background: #16213e;
+    border-bottom: 1px solid #0f3460;
+}
+
+.admin-header h1 {
+    font-size: 20px;
+    font-weight: 600;
+    color: #eee;
+}
+
+.btn-back {
+    background: #0f3460;
+    color: #eee;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-back:hover {
+    background: #e94560;
+}
+
+/* タブナビゲーション */
+.admin-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 12px 24px;
+    background: #16213e;
+    border-bottom: 1px solid #0f3460;
+}
+
+.tab-btn {
+    background: transparent;
+    color: #888;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px 8px 0 0;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 14px;
+}
+
+.tab-btn:hover {
+    background: #0f3460;
+    color: #eee;
+}
+
+.tab-btn.active {
+    background: #1a1a2e;
+    color: #e94560;
+    border-bottom: 2px solid #e94560;
+}
+
+/* タブコンテンツ */
+.admin-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.section-header h2 {
+    font-size: 18px;
+    color: #eee;
+}
+
+/* ボタン共通 */
+.btn {
+    background: #0f3460;
+    color: #eee;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+    font-size: 13px;
+}
+
+.btn:hover {
+    background: #1a4a7a;
+}
+
+.btn-primary {
+    background: #e94560;
+}
+
+.btn-primary:hover {
+    background: #ff6b6b;
+}
+
+.btn-danger {
+    background: #c0392b;
+}
+
+.btn-danger:hover {
+    background: #e74c3c;
+}
+
+/* 統計カード */
+.memory-stats,
+.users-stats {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+}
+
+.stat-card {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    padding: 16px 24px;
+    min-width: 120px;
+    text-align: center;
+}
+
+.stat-label {
+    display: block;
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 8px;
+}
+
+.stat-value {
+    display: block;
+    font-size: 24px;
+    font-weight: bold;
+    color: #e94560;
+}
+
+/* 検索 */
+.memory-search {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.memory-search input {
+    flex: 1;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    padding: 10px 16px;
+    color: #eee;
+    font-size: 14px;
+}
+
+.memory-search input:focus {
+    outline: none;
+    border-color: #e94560;
+}
+
+/* 記憶リスト */
+.memory-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.memory-item {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    padding: 16px;
+}
+
+.memory-header {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 8px;
+    font-size: 12px;
+}
+
+.memory-type {
+    background: #0f3460;
+    padding: 4px 8px;
+    border-radius: 4px;
+    color: #e94560;
+}
+
+.memory-importance {
+    color: #888;
+}
+
+.memory-user {
+    color: #4a9eff;
+}
+
+.memory-content {
+    font-size: 14px;
+    color: #eee;
+    line-height: 1.5;
+    margin-bottom: 8px;
+}
+
+.memory-meta {
+    font-size: 11px;
+    color: #666;
+}
+
+/* ユーザーリスト */
+.users-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.user-item {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    padding: 16px;
+}
+
+.user-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.user-name {
+    font-size: 16px;
+    font-weight: 600;
+    color: #eee;
+}
+
+.user-id {
+    font-size: 12px;
+    color: #888;
+}
+
+.user-meta {
+    font-size: 12px;
+    color: #666;
+}
+
+/* LLM設定 */
+.llm-settings {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.setting-group {
+    margin-bottom: 16px;
+}
+
+.setting-group label {
+    display: block;
+    font-size: 14px;
+    color: #888;
+    margin-bottom: 8px;
+}
+
+.setting-group select {
+    width: 100%;
+    max-width: 400px;
+    background: #1a1a2e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    padding: 10px 16px;
+    color: #eee;
+    font-size: 14px;
+}
+
+.setting-group select:focus {
+    outline: none;
+    border-color: #e94560;
+}
+
+.llm-status {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    padding: 20px;
+}
+
+.llm-status h3 {
+    font-size: 14px;
+    color: #888;
+    margin-bottom: 8px;
+}
+
+/* Discord状態 */
+.discord-status {
+    display: flex;
+    gap: 24px;
+    margin-bottom: 20px;
+}
+
+.status-item {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    padding: 16px 24px;
+    min-width: 150px;
+}
+
+.status-label {
+    display: block;
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 8px;
+}
+
+.status-value {
+    font-size: 16px;
+    font-weight: 600;
+    color: #eee;
+}
+
+.status-value.status-ok {
+    color: #2ecc71;
+}
+
+.discord-actions {
+    display: flex;
+    gap: 12px;
+}
+
+/* 会話ログ */
+.logs-container {
+    display: flex;
+    gap: 20px;
+    height: calc(100vh - 280px);
+}
+
+.logs-sidebar {
+    width: 280px;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    overflow-y: auto;
+}
+
+.logs-sidebar .conversation-list {
+    padding: 8px;
+}
+
+.logs-sidebar .conversation-item {
+    padding: 12px;
+    margin-bottom: 4px;
+}
+
+.logs-viewer {
+    flex: 1;
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    padding: 20px;
+    overflow-y: auto;
+}
+
+.logs-viewer .placeholder {
+    color: #666;
+    text-align: center;
+    padding: 40px;
+}
+
+.log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #0f3460;
+}
+
+.log-header h3 {
+    font-size: 16px;
+    color: #eee;
+}
+
+.log-header span {
+    font-size: 12px;
+    color: #666;
+}
+
+.log-messages {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.log-message {
+    padding: 12px;
+    border-radius: 8px;
+}
+
+.log-message.user {
+    background: #0f3460;
+}
+
+.log-message.assistant {
+    background: #1a1a2e;
+    border: 1px solid #0f3460;
+}
+
+.log-message-header {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 8px;
+    font-size: 12px;
+}
+
+.log-message-header .role {
+    color: #e94560;
+}
+
+.log-message-header .user-id {
+    color: #4a9eff;
+}
+
+.log-message-header .display-name {
+    color: #2ecc71;
+}
+
+.log-message-header .timestamp {
+    color: #666;
+    margin-left: auto;
+}
+
+.log-message-content {
+    font-size: 14px;
+    color: #eee;
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+/* アクションボタングループ */
+.memory-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* データなし表示 */
+.no-data {
+    color: #666;
+    text-align: center;
+    padding: 24px;
+    font-style: italic;
+}
+
+.error {
+    color: #e74c3c;
+    text-align: center;
+    padding: 24px;
+}

@@ -92,7 +92,6 @@ export class DiscordBot extends EventEmitter {
         if (message.author.bot) return;
 
         // チャンネル制限がある場合はチェック
-        // チャンネル制限がある場合はチェック
         if (this.config.allowedChannels &&
             this.config.allowedChannels.length > 0 &&
             !this.config.allowedChannels.includes(message.channelId)) {
@@ -128,6 +127,8 @@ export class DiscordBot extends EventEmitter {
             }
             return;
         }
+
+        // 実験的にすべてのチャットに返信（返信しないこともある）-> 一旦キャンセル
 
         // メンションまたはプレフィックスで始まるメッセージのみ応答
         const isMentioned = message.mentions.has(this.client.user!);

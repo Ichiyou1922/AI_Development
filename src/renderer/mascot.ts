@@ -1,7 +1,6 @@
 // マスコットモード専用スクリプト
 
 // Live2D初期化
-// Live2D初期化
 document.addEventListener('DOMContentLoaded', async () => {
     // コンソールログをMainプロセスに転送
     if ((window as any).electronAPI?.log) {
@@ -27,11 +26,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
-// チャットボタン
-const chatBtn = document.getElementById('chat-btn');
-if (chatBtn) {
-    chatBtn.addEventListener('click', () => {
-        // メインウィンドウを開く（IPC経由）
+// 管理モードボタン（⚙️）
+const settingsBtn = document.getElementById('settings-btn');
+if (settingsBtn) {
+    settingsBtn.addEventListener('click', () => {
+        // 管理ウィンドウを開く（IPC経由）
         if ((window as any).electronAPI?.openMainWindow) {
             (window as any).electronAPI.openMainWindow();
         }

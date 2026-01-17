@@ -1,3 +1,6 @@
+// TypeScriptにモジュールとして認識させる（グローバルスコープの重複エラー回避）
+export {};
+
 // Live2D関数はグローバルに公開されている（live2d.tsから）
 declare function initLive2D(): Promise<void>;
 declare function setMouthOpen(value: number): void;

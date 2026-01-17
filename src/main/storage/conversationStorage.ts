@@ -102,7 +102,9 @@ export class ConversationStorage {
     async addMessage(
         id: string,
         role: StoredMessage['role'],
-        content: string
+        content: string,
+        discordUserId?: string,
+        displayName?: string
     ): Promise<Conversation | null> {
         const conversation = await this.load(id);
         if (!conversation) {
@@ -113,6 +115,8 @@ export class ConversationStorage {
             role,
             content,
             timestamp: Date.now(),
+            discordUserId,
+            displayName,
         };
 
         conversation.messages.push(message);

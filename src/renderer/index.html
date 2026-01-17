@@ -3,54 +3,167 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; 
-                   script-src 'self' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; 
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
+                   script-src 'self' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net;
                    style-src 'self' 'unsafe-inline';">
-    <title>AI Agent</title>
+    <title>AI Agent 管理モード</title>
     <link rel="stylesheet" href="style.css">
-    <!-- PixiJS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.4.2/pixi.min.js"></script>
-    <!-- Live2D Cubism Core -->
-    <script src="lib/live2dcubismcore.min.js"></script>
-    <!-- pixi-live2d-display -->
-    <script src="https://cdn.jsdelivr.net/npm/pixi-live2d-display/dist/cubism4.min.js"></script>
 </head>
 
 <body>
-    <div class="app-container">
-        <!-- サイドバー：会話一覧 -->
-        <aside class="sidebar">
-            <div class="sidebar-header">
-                <h2>会話履歴</h2>
-                <button id="new-conversation-btn" class="btn-new">+ 新規</button>
-            </div>
-            <ul id="conversation-list" class="conversation-list">
-                <!-- 動的に生成 -->
-            </ul>
-        </aside>
+    <div class="admin-container">
+        <!-- ヘッダー -->
+        <header class="admin-header">
+            <h1>⚙️ AI Agent 管理モード</h1>
+            <button id="back-to-mascot-btn" class="btn-back">マスコットに戻る</button>
+        </header>
 
-        <!-- メインエリア -->
-        <main class="main-area">
-            <!-- Live2Dアバター表示エリア -->
-            <div id="avatar-container" class="avatar-container">
-                <canvas id="avatar-canvas"></canvas>
-            </div>
+        <!-- タブナビゲーション -->
+        <nav class="admin-tabs">
+            <button class="tab-btn active" data-tab="memory">📚 記憶管理</button>
+            <button class="tab-btn" data-tab="users">👥 ユーザー管理</button>
+            <button class="tab-btn" data-tab="llm">🤖 LLM設定</button>
+            <button class="tab-btn" data-tab="discord">💬 Discord状態</button>
+            <button class="tab-btn" data-tab="logs">📝 会話ログ</button>
+        </nav>
 
-            <div id="chat-container" class="chat-container">
-                <!-- メッセージ表示エリア -->
-            </div>
-            <div class="input-area">
-                <button id="voice-btn" class="voice-btn" title="音声入力">🎤</button>
-                <button id="mascot-btn" class="mascot-btn" title="マスコットモード">🖼️</button>
-                <textarea id="message-input" placeholder="メッセージを入力..."></textarea>
-                <button id="send-btn">送信</button>
-            </div>
+        <!-- タブコンテンツ -->
+        <main class="admin-content">
+            <!-- 記憶管理タブ -->
+            <section id="tab-memory" class="tab-content active">
+                <div class="section-header">
+                    <h2>記憶管理</h2>
+                    <div class="memory-actions">
+                        <button id="memory-refresh-btn" class="btn">🔄 更新</button>
+                        <button id="memory-maintenance-btn" class="btn">🧹 メンテナンス実行</button>
+                        <button id="memory-clear-btn" class="btn btn-danger">🗑️ 全消去</button>
+                    </div>
+                </div>
+
+                <div class="memory-stats" id="memory-stats">
+                    <div class="stat-card">
+                        <span class="stat-label">記憶数</span>
+                        <span class="stat-value" id="memory-count">-</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">事実</span>
+                        <span class="stat-value" id="memory-facts">-</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">エピソード</span>
+                        <span class="stat-value" id="memory-episodes">-</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">好み</span>
+                        <span class="stat-value" id="memory-preferences">-</span>
+                    </div>
+                </div>
+
+                <div class="memory-search">
+                    <input type="text" id="memory-search-input" placeholder="記憶を検索...">
+                    <button id="memory-search-btn" class="btn">検索</button>
+                </div>
+
+                <div class="memory-list" id="memory-list">
+                    <!-- 動的に生成 -->
+                </div>
+            </section>
+
+            <!-- ユーザー管理タブ -->
+            <section id="tab-users" class="tab-content">
+                <div class="section-header">
+                    <h2>Discord ユーザー管理</h2>
+                    <button id="users-refresh-btn" class="btn">🔄 更新</button>
+                </div>
+
+                <div class="users-stats" id="users-stats">
+                    <div class="stat-card">
+                        <span class="stat-label">総ユーザー数</span>
+                        <span class="stat-value" id="users-total">-</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-label">名前登録済み</span>
+                        <span class="stat-value" id="users-named">-</span>
+                    </div>
+                </div>
+
+                <div class="users-list" id="users-list">
+                    <!-- 動的に生成 -->
+                </div>
+            </section>
+
+            <!-- LLM設定タブ -->
+            <section id="tab-llm" class="tab-content">
+                <div class="section-header">
+                    <h2>LLM プロバイダ設定</h2>
+                </div>
+
+                <div class="llm-settings">
+                    <div class="setting-group">
+                        <label>優先プロバイダ</label>
+                        <select id="llm-provider-select">
+                            <option value="ollama">Ollama (ローカル)</option>
+                            <option value="anthropic">Anthropic (Claude)</option>
+                            <option value="ollama-first">Ollama優先 (フォールバック: Anthropic)</option>
+                            <option value="anthropic-first">Anthropic優先 (フォールバック: Ollama)</option>
+                        </select>
+                    </div>
+                    <button id="llm-save-btn" class="btn btn-primary">設定を保存</button>
+                </div>
+
+                <div class="llm-status" id="llm-status">
+                    <h3>現在の状態</h3>
+                    <div id="llm-current-provider">-</div>
+                </div>
+            </section>
+
+            <!-- Discord状態タブ -->
+            <section id="tab-discord" class="tab-content">
+                <div class="section-header">
+                    <h2>Discord Bot 状態</h2>
+                    <button id="discord-refresh-btn" class="btn">🔄 更新</button>
+                </div>
+
+                <div class="discord-status">
+                    <div class="status-item">
+                        <span class="status-label">Bot状態</span>
+                        <span class="status-value" id="discord-bot-status">-</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">音声接続</span>
+                        <span class="status-value" id="discord-voice-status">-</span>
+                    </div>
+                </div>
+
+                <div class="discord-actions">
+                    <button id="discord-start-btn" class="btn">▶️ 開始</button>
+                    <button id="discord-stop-btn" class="btn">⏹️ 停止</button>
+                </div>
+            </section>
+
+            <!-- 会話ログタブ -->
+            <section id="tab-logs" class="tab-content">
+                <div class="section-header">
+                    <h2>会話ログ（閲覧のみ）</h2>
+                    <button id="logs-refresh-btn" class="btn">🔄 更新</button>
+                </div>
+
+                <div class="logs-container">
+                    <aside class="logs-sidebar">
+                        <ul id="conversation-list" class="conversation-list">
+                            <!-- 動的に生成 -->
+                        </ul>
+                    </aside>
+                    <div class="logs-viewer" id="logs-viewer">
+                        <p class="placeholder">会話を選択してください</p>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
-    <!-- Live2D初期化（CDN版） -->
-    <script src="live2d.js"></script>
+
     <!-- メインRenderer -->
-    <script src="renderer.js"></script>
+    <script src="admin.js"></script>
 </body>
 
 </html>

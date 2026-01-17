@@ -146,8 +146,10 @@ export class VectorStore {
             if (filter) {
                 if (filter.type && entry.metadata.type !== filter.type) continue;
                 if (filter.source && entry.metadata.source !== filter.source) continue;
-                if (filter.importance !== undefined && 
+                if (filter.importance !== undefined &&
                     entry.metadata.importance < filter.importance) continue;
+                // Discord userIdフィルタ
+                if (filter.discordUserId && entry.metadata.discordUserId !== filter.discordUserId) continue;
             }
 
             const score = cosineSimilarity(queryVector, entry.vector);

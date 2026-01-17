@@ -24,7 +24,7 @@ interface ForgetDecision {
 /**
  * 記憶のライフサイクル管理
  * - 圧縮: 古いエピソード記憶を要約
- * - 忘却: 不要な記憶を削除
+ * - 忘却: 不要な記憶を削除// Live2D初期化
  */
 export class MemoryLifecycle {
     private vectorStore: VectorStore;
@@ -33,6 +33,25 @@ export class MemoryLifecycle {
     constructor(vectorStore: VectorStore, llmRouter: LLMRouter) {
         this.vectorStore = vectorStore;
         this.llmRouter = llmRouter;
+    }
+
+    /**
+     * 安全なログ出力（I/Oエラーを無視）
+     */
+    private safeLog(message: string): void {
+        try {
+            console.log(message);
+        } catch {
+            // ストリームが閉じられている場合は無視
+        }
+    }
+
+    private safeError(message: string, error?: any): void {
+        try {
+            console.error(message, error);
+        } catch {
+            // ストリームが閉じられている場合は無視
+        }
     }
 
     /**
@@ -49,7 +68,7 @@ export class MemoryLifecycle {
         const episodes = oldMemories.filter(m => m.metadata.type === 'episode');
 
         if (episodes.length < minCount) {
-            console.log(`[MemoryLifecycle] Not enough old episodes to compress: ${episodes.length}`);
+            this.safeLog(`[MemoryLifecycle] Not enough old episodes to compress: ${episodes.length}`);
             return null;
         }
 
@@ -70,12 +89,12 @@ ${contentsToSummarize}
             {
                 onToken: (token) => { summary += token; },
                 onDone: () => {},
-                onError: (error) => { console.error('[MemoryLifecycle] Compression error:', error); },
+                onError: (error) => { this.safeError('[MemoryLifecycle] Compression error:', error); },
             }
         );
 
         if (!summary.trim()) {
-            console.error('[MemoryLifecycle] Failed to generate summary');
+            this.safeError('[MemoryLifecycle] Failed to generate summary');
             return null;
         }
 
@@ -93,7 +112,7 @@ ${contentsToSummarize}
             tags: ['compressed', 'summary'],
         });
 
-        console.log(`[MemoryLifecycle] Compressed ${episodes.length} memories into 1`);
+        this.safeLog(`[MemoryLifecycle] Compressed ${episodes.length} memories into 1`);
 
         return {
             originalIds,
@@ -151,7 +170,7 @@ ${memory.content}
             {
                 onToken: (token) => { response += token; },
                 onDone: () => {},
-                onError: (error) => { console.error('[MemoryLifecycle] Evaluation error:', error); },
+                onError: (error) => { this.safeError('[MemoryLifecycle] Evaluation error:', error); },
             }
         );
 
@@ -179,7 +198,7 @@ ${memory.content}
                 const success = await this.vectorStore.delete(decision.id);
                 if (success) {
                     deletedCount++;
-                    console.log(`[MemoryLifecycle] Forgot: ${decision.content} (${decision.reason})`);
+                    this.safeLog(`[MemoryLifecycle] Forgot: ${decision.content} (${decision.reason})`);
                 }
             }
         }
@@ -228,7 +247,7 @@ ${memory.content}
         forgotten: number;
         adjusted: number;
     }> {
-        console.log('[MemoryLifecycle] Starting maintenance...');
+        this.safeLog('[MemoryLifecycle] Starting maintenance...');
 
         // 1. 重要度調整
         await this.adjustImportance();
@@ -242,7 +261,7 @@ ${memory.content}
         const forgetDecisions = await this.evaluateForForgetting(5);
         const forgotten = await this.executeForget(forgetDecisions);
 
-        console.log(`[MemoryLifecycle] Maintenance complete: compressed=${compressed}, forgotten=${forgotten}`);
+        this.safeLog(`[MemoryLifecycle] Maintenance complete: compressed=${compressed}, forgotten=${forgotten}`);
 
         return {
             compressed,

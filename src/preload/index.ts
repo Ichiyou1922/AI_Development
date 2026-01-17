@@ -214,6 +214,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     discordVoiceStatus: () =>
         ipcRenderer.invoke('discord-voice-status'),
 
+    // Discord ユーザー管理
+    discordUsersGetAll: () =>
+        ipcRenderer.invoke('discord-users-get-all'),
+
+    discordUsersStats: () =>
+        ipcRenderer.invoke('discord-users-stats'),
+
+    discordUsersGet: (discordId: string) =>
+        ipcRenderer.invoke('discord-users-get', discordId),
+
+    discordUsersSetName: (discordId: string, name: string) =>
+        ipcRenderer.invoke('discord-users-set-name', discordId, name),
+
     onDiscordVoiceReceived: (callback: (data: any) => void) => {
         ipcRenderer.on('discord-voice-received', (_event, data) => callback(data));
     },

@@ -18,6 +18,7 @@ import { AudioPlayer } from './voice/audioPlayer.js';
 import { VoiceDialogueController, DialogueState } from './voice/voiceDialogueController.js';
 import { StreamingTTSController } from './voice/streamingTTSController.js';
 import { DiscordBot, DiscordMessageContext, IdentifiedAudio } from './discord/index.js';
+import { getDiscordUserManager, DiscordUser } from './memory/discordUsers.js';
 import { MascotWindow } from './windows/MascotWindow.js';
 import {
     eventBus,
@@ -46,6 +47,24 @@ let discordBot: DiscordBot | null = null;
 let sttRouter: STTRouter;
 let alwaysOnListener: AlwaysOnListener | null = null;
 let discordStreamingTTS: StreamingTTSController | null = null;
+let maintenanceTimer: ReturnType<typeof setInterval> | null = null;
+
+// グローバルエラーハンドラ（アプリ終了時のwrite EIOエラーを無視）
+process.on('uncaughtException', (error) => {
+    // アプリ終了時のI/Oエラーは無視
+    if (error.message?.includes('write EIO') || error.message?.includes('write EPIPE')) {
+        return;
+    }
+    console.error('[App] Uncaught Exception:', error);
+});
+
+process.on('unhandledRejection', (reason) => {
+    // アプリ終了時のI/Oエラーは無視
+    if (reason instanceof Error && (reason.message?.includes('write EIO') || reason.message?.includes('write EPIPE'))) {
+        return;
+    }
+    console.error('[App] Unhandled Rejection:', reason);
+});
 
 // app.isQuittingはelectronTypes.d.tsで定義
 
@@ -65,6 +84,126 @@ let conversationStorage: ConversationStorage;
 let activeConversationId: string | null = null;
 
 let mainWindow: BrowserWindow | null = null;
+
+// ============================================================
+// 会話コンテキストマネージャ（多人数会話の文脈管理）
+// ============================================================
+
+interface SpeakerEntry {
+    discordUserId: string;
+    displayName: string;
+    lastSpeakTime: number;
+}
+
+class ConversationContextManager {
+    // 現在の会話参加者（最近発言した順）
+    private participants: Map<string, SpeakerEntry> = new Map();
+    // 発言履歴（最新10件）
+    private speakerHistory: Array<{ userId: string; displayName: string; content: string; timestamp: number }> = [];
+    // 参加者の最大保持数
+    private readonly MAX_PARTICIPANTS = 10;
+    // 履歴の最大保持数
+    private readonly MAX_HISTORY = 10;
+    // 参加者の有効期限（30分）
+    private readonly PARTICIPANT_TTL_MS = 30 * 60 * 1000;
+
+    /**
+     * 発言を記録
+     */
+    recordSpeaker(discordUserId: string, displayName: string, content: string): void {
+        const now = Date.now();
+
+        // 参加者リストを更新
+        this.participants.set(discordUserId, {
+            discordUserId,
+            displayName,
+            lastSpeakTime: now,
+        });
+
+        // 発言履歴に追加
+        this.speakerHistory.push({
+            userId: discordUserId,
+            displayName,
+            content: content.substring(0, 100), // 最初の100文字のみ
+            timestamp: now,
+        });
+
+        // 履歴が最大を超えたら古いものを削除
+        if (this.speakerHistory.length > this.MAX_HISTORY) {
+            this.speakerHistory.shift();
+        }
+
+        // 古い参加者を削除
+        this.cleanupOldParticipants();
+    }
+
+    /**
+     * 古い参加者を削除
+     */
+    private cleanupOldParticipants(): void {
+        const now = Date.now();
+        const threshold = now - this.PARTICIPANT_TTL_MS;
+
+        for (const [userId, entry] of this.participants) {
+            if (entry.lastSpeakTime < threshold) {
+                this.participants.delete(userId);
+            }
+        }
+    }
+
+    /**
+     * 現在の参加者リストを取得
+     */
+    getParticipants(): SpeakerEntry[] {
+        return Array.from(this.participants.values())
+            .sort((a, b) => b.lastSpeakTime - a.lastSpeakTime);
+    }
+
+    /**
+     * 直近の発言者を取得
+     */
+    getRecentSpeakers(count: number = 3): Array<{ userId: string; displayName: string; content: string }> {
+        return this.speakerHistory.slice(-count).reverse();
+    }
+
+    /**
+     * LLMプロンプト用のコンテキストを生成
+     */
+    formatForPrompt(): string {
+        const parts: string[] = [];
+
+        // 現在の会話参加者
+        const participants = this.getParticipants();
+        if (participants.length > 0) {
+            parts.push('【現在の会話参加者】');
+            for (const p of participants) {
+                parts.push(`- ${p.displayName}`);
+            }
+        }
+
+        // 直近の発言履歴
+        const recent = this.getRecentSpeakers(5);
+        if (recent.length > 0) {
+            parts.push('\n【直近の発言】');
+            for (const s of recent) {
+                parts.push(`- ${s.displayName}: 「${s.content}」`);
+            }
+        }
+
+        return parts.join('\n');
+    }
+
+    /**
+     * 会話をリセット
+     */
+    reset(): void {
+        this.participants.clear();
+        this.speakerHistory = [];
+    }
+}
+
+// グローバルインスタンス
+const conversationContext = new ConversationContextManager();
 
 async function createWindow(): Promise<void> {
     mainWindow = new BrowserWindow({
@@ -178,20 +317,31 @@ async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string
         userContext: ctx.userContext,
     });
 
+    // 発言者名を決定
+    const speakerName = ctx.displayName || ctx.username;
+
+    // 会話コンテキストに発言を記録
+    conversationContext.recordSpeaker(ctx.userId, speakerName, ctx.content);
+
     // アクティブ会話がなければ新規作成（Discord用に別管理も可能）
     if (!activeConversationId) {
-        const speakerName = ctx.displayName || ctx.username;
         const newConv = await conversationStorage.create(`Discord: ${speakerName}`);
         activeConversationId = newConv.id;
     }
 
-    // ユーザーメッセージを保存（ユーザーコンテキストなしで保存、履歴には残さない）
-    await conversationStorage.addMessage(activeConversationId, 'user', ctx.content);
+    // ユーザーメッセージを保存（Discord userIdと表示名を紐付け）
+    await conversationStorage.addMessage(activeConversationId, 'user', ctx.content, ctx.userId, speakerName);
 
-    // 記憶検索
+    // 記憶検索（全体 + ユーザー別）
     let memoryContext = '';
     try {
         memoryContext = await memoryManager.buildContextForPrompt(ctx.content);
+        // ユーザー別の記憶も検索
+        const userMemories = await memoryManager.searchUserMemories(ctx.content, ctx.userId, 3, 0.4);
+        if (userMemories.length > 0) {
+            const userMemoryText = userMemories.map(m => `- ${m.entry.content}`).join('\n');
+            memoryContext += `\n\n【${speakerName}に関する記憶】\n${userMemoryText}`;
+        }
     } catch (error) {
         console.error('[Discord] Context building failed:', error);
     }
@@ -210,11 +360,26 @@ async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string
     systemPromptParts.push(`\n\n【あなたの名前】\nあなたの名前は「${aiName}」です。自分の名前を聞かれたら「${aiName}」と答えてください。`);
     systemPromptParts.push(`\n名前と一人称（私、僕など）を明確に区別してください。「私」は名前ではありません。`);
 
+    // adminの場合、親として認識
+    if (ctx.isAdmin) {
+        systemPromptParts.push(`\n\n【重要な関係】\n${speakerName}はあなたの「開発者」です。親しみを込めて接してください。`);
+    }
+
+    // 会話参加者コンテキストを追加
+    const participantContext = conversationContext.formatForPrompt();
+    if (participantContext) {
+        systemPromptParts.push(`\n\n${participantContext}`);
+    }
+
     // 発言者情報を追加
-    const speakerName = ctx.displayName || ctx.username;
     console.log('[Discord] Speaker name resolved to:', speakerName);
     systemPromptParts.push(`\n\n【現在の発言者】\n${ctx.userContext}`);
     systemPromptParts.push(`この人の名前は「${speakerName}」です。名前を呼んで話しかけてください。`);
+
+    // 記憶コンテキストを追加
+    if (memoryContext) {
+        systemPromptParts.push(`\n\n${memoryContext}`);
+    }
 
     const fullSystemPrompt = systemPromptParts.join('');
 
@@ -243,11 +408,11 @@ async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string
                 // アシスタントメッセージを保存
                 await conversationStorage.addMessage(activeConversationId!, 'assistant', fullText);
 
-                // 情報抽出・記憶保存
+                // 情報抽出・記憶保存（Discord userIdを紐付け）
                 try {
                     const extractedInfo = memoryManager.extractInfoFromMessage(ctx.content, fullText);
                     if (extractedInfo) {
-                        await memoryManager.saveExtractedInfo(extractedInfo, activeConversationId!);
+                        await memoryManager.saveExtractedInfo(extractedInfo, activeConversationId!, ctx.userId, speakerName);
                     }
                 } catch (error) {
                     console.error('[Discord] Memory extraction failed:', error);
@@ -287,6 +452,7 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
     // ユーザー情報を取得（discordBotが初期化されている場合）
     let speakerName = audio.username;
     let userContext = `発言者: ${audio.username}`;
+    let isAdmin = false;
     console.log(`[Discord Voice] Looking up user: userId=${audio.userId}, username=${audio.username}`);
     console.log(`[Discord Voice] Admin config: id=${config.discord.admin?.id}, name=${config.discord.admin?.name}`);
 
@@ -295,12 +461,15 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
         console.log(`[Discord Voice] getUserName returned: ${name}`);
         if (name) {
             speakerName = name;
-            const isAdmin = config.discord.admin?.id === audio.userId;
-            userContext = isAdmin ? `発言者: ${name}（管理者）` : `発言者: ${name}`;
+            isAdmin = config.discord.admin?.id === audio.userId;
+            userContext = isAdmin ? `発言者: ${name}（管理者/お父さん）` : `発言者: ${name}`;
         }
     }
 
     console.log(`[Discord Voice] Speaker resolved to: ${speakerName}`);
+
+    // 会話コンテキストに発言を記録
+    conversationContext.recordSpeaker(audio.userId, speakerName, userText);
 
     // message process
     // if active conversation is not set, create new conversation
@@ -309,13 +478,19 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
         activeConversationId = newConv.id;
     }
 
-    // user message save（ユーザーコンテキストなしで保存）
-    await conversationStorage.addMessage(activeConversationId, 'user', userText);
+    // user message save（Discord userIdと表示名を紐付け）
+    await conversationStorage.addMessage(activeConversationId, 'user', userText, audio.userId, speakerName);
 
-    // memory search
+    // memory search（全体 + ユーザー別）
     let memoryContext = '';
     try {
         memoryContext = await memoryManager.buildContextForPrompt(userText);
+        // ユーザー別の記憶も検索
+        const userMemories = await memoryManager.searchUserMemories(userText, audio.userId, 3, 0.4);
+        if (userMemories.length > 0) {
+            const userMemoryText = userMemories.map(m => `- ${m.entry.content}`).join('\n');
+            memoryContext += `\n\n【${speakerName}に関する記憶】\n${userMemoryText}`;
+        }
     } catch (error) {
         console.log('[Discord Voice] Context building failed:', error);
     }
@@ -334,6 +509,17 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
     systemPromptParts.push(`\n\n【あなたの名前】\nあなたの名前は「${aiName}」です。自分の名前を聞かれたら「${aiName}」と答えてください。`);
     systemPromptParts.push(`\n名前と一人称（私、僕など）を明確に区別してください。「私」は名前ではありません。`);
 
+    // adminの場合、親として認識
+    if (isAdmin) {
+        systemPromptParts.push(`\n\n【重要な関係】\n${speakerName}はあなたの「お父さん」（親/保護者）です。親しみを込めて接してください。`);
+    }
+
+    // 会話参加者コンテキストを追加
+    const participantContext = conversationContext.formatForPrompt();
+    if (participantContext) {
+        systemPromptParts.push(`\n\n${participantContext}`);
+    }
+
     // 発言者情報を追加
     systemPromptParts.push(`\n\n【現在の発言者】\n${userContext}`);
     systemPromptParts.push(`この人の名前は「${speakerName}」です。名前を呼んで話しかけてください。`);
@@ -341,7 +527,7 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
 
     // 記憶コンテキストがあれば追加
     if (memoryContext) {
-        systemPromptParts.push(`\n\n【関連する記憶】\n${memoryContext}`);
+        systemPromptParts.push(`\n\n${memoryContext}`);
     }
 
     const fullSystemPrompt = systemPromptParts.join('');
@@ -395,12 +581,12 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
                 // assistant message save
                 await conversationStorage.addMessage(activeConversationId!, 'assistant', fullText);
 
-                // MemoryManager: 情報抽出・記憶保存 (修正: ここに追加)
+                // MemoryManager: 情報抽出・記憶保存（Discord userIdを紐付け）
                 try {
                     const extractedInfo = memoryManager.extractInfoFromMessage(userText, fullText);
                     if (extractedInfo) {
-                        await memoryManager.saveExtractedInfo(extractedInfo, activeConversationId!);
-                        console.log('[Discord Voice] Saved memory:', extractedInfo.content);
+                        await memoryManager.saveExtractedInfo(extractedInfo, activeConversationId!, audio.userId, speakerName);
+                        console.log('[Discord Voice] Saved memory:', extractedInfo.content, `(User: ${audio.userId})`);
                     }
                 } catch (error) {
                     console.error('[Discord Voice] Memory extraction failed:', error);
@@ -989,6 +1175,56 @@ ipcMain.handle('stt-switch-provider', async (_event, type: 'whisper-cpp' | 'fast
     return { success, activeProvider: sttRouter.getActiveProvider() };
 });
 
+// ============================================================
+// Discord ユーザー管理
+// ============================================================
+
+ipcMain.handle('discord-users-get-all', () => {
+    try {
+        const userManager = getDiscordUserManager();
+        return userManager.getAllUsers();
+    } catch (error) {
+        console.error('[IPC] discord-users-get-all error:', error);
+        return [];
+    }
+});
+
+ipcMain.handle('discord-users-stats', () => {
+    try {
+        const userManager = getDiscordUserManager();
+        const stats = userManager.getStats();
+        return {
+            totalUsers: stats.total,
+            namedUsers: stats.named,
+            admin: stats.admin,
+        };
+    } catch (error) {
+        console.error('[IPC] discord-users-stats error:', error);
+        return { totalUsers: 0, namedUsers: 0, admin: null };
+    }
+});
+
+ipcMain.handle('discord-users-get', (_event, discordId: string) => {
+    try {
+        const userManager = getDiscordUserManager();
+        return userManager.getUser(discordId);
+    } catch (error) {
+        console.error('[IPC] discord-users-get error:', error);
+        return null;
+    }
+});
+
+ipcMain.handle('discord-users-set-name', (_event, discordId: string, name: string) => {
+    try {
+        const userManager = getDiscordUserManager();
+        const success = userManager.setName(discordId, name);
+        return { success };
+    } catch (error) {
+        console.error('[IPC] discord-users-set-name error:', error);
+        return { success: false, error: String(error) };
+    }
+});
+
 app.whenReady().then(async () => {
     // ============================================================
     // 設定システムの初期化（最初に実行）
@@ -1024,8 +1260,14 @@ app.whenReady().then(async () => {
     console.log('[App] Memory system initialized');
 
     await createWindow();
+    // マスコットウィンドウを最初に作成・表示
+    createMascotWindow();
+    // メインウィンドウは非表示で起動（管理モード用）
+    if (mainWindow) {
+        mainWindow.hide();
+    }
     // 定期メンテナンス（設定ファイルで間隔を変更可能）
-    setInterval(async () => {
+    maintenanceTimer = setInterval(async () => {
         try {
             await memoryLifecycle.runMaintenance();
         } catch (error) {
@@ -1277,7 +1519,13 @@ app.whenReady().then(async () => {
     // ============================================================
 
     // システムプロンプトを設定
-    autonomousController.setSystemPrompt(config.prompts.system);
+    // システムプロンプトを設定（プレースホルダー禁止を明示）
+    const autonomousSystemPrompt = config.prompts.system + `
+\n【重要】
+相手の名前がわからない場合でも、「〇〇さん」や「ユーザーさん」といったプレースホルダーは絶対に使わないでください。
+その場合は「きみ」や「あなた」と呼ぶか、名前を呼ばずに話しかけてください。
+固有名詞が不明な場合も「〇〇」と表現せず、「それ」や「あれ」などの代名詞を使ってください。`;
+    autonomousController.setSystemPrompt(autonomousSystemPrompt);
 
     // LLMハンドラを設定（新形式：システムプロンプト + ユーザーメッセージ）
     autonomousController.setLLMHandler(async (systemPrompt: string, userMessage: string) => {
@@ -1470,7 +1718,7 @@ app.whenReady().then(async () => {
             const systemPrompt = config.prompts.system + `
 【現在の対話相手】
 名前: ${username}
-この人の名前は「${username}」です。名前を呼んで親しく話しかけてください。
+この人の名前は「${username}」です。名前の代わりに「あなた」や「きみ」と呼んでも構いません。状況に合わせてあなたが面白いと思う対応をしてください。
 
 【重要】
 相手の名前がわからない場合でも、「〇〇さん」や「ゼロゼロさん」といったプレースホルダーは絶対に使わないでください。
@@ -1521,6 +1769,12 @@ app.whenReady().then(async () => {
 app.on('before-quit', async () => {
     console.log('[App] Stopping background services...');
 
+    // メンテナンスタイマーを停止
+    if (maintenanceTimer) {
+        clearInterval(maintenanceTimer);
+        maintenanceTimer = null;
+    }
+
     // イベント発生源を停止
     idleDetector.stop();
     timerTrigger.stopAll();
@@ -1540,6 +1794,8 @@ app.on('before-quit', async () => {
     if (discordBot) {
         await discordBot.stop();
     }
+
+    mascotWindow?.destroy();
 
     console.log('[App] Cleanup complete');
 });

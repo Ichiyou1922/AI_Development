@@ -215,7 +215,9 @@ export class MemoryManager {
      */
     async saveExtractedInfo(
         info: ExtractedInfo,
-        conversationId?: string
+        conversationId?: string,
+        discordUserId?: string,
+        displayName?: string
     ): Promise<MemoryEntry | null> {
         if (!info.shouldSave) return null;
 
@@ -239,9 +241,11 @@ export class MemoryManager {
             conversationId,
             importance: info.importance,
             tags: info.tags,
+            discordUserId,
+            displayName,
         });
 
-        console.log(`[MemoryManager] Saved memory: ${info.content}`);
+        console.log(`[MemoryManager] Saved memory: ${info.content}${discordUserId ? ` (User: ${discordUserId})` : ''}`);
         return entry;
     }
 
@@ -257,6 +261,53 @@ export class MemoryManager {
 
         // スコアでフィルタリング
         return results.filter(r => r.score >= minScore);
+    }
+
+    /**
+     * 特定ユーザーの記憶を検索
+     */
+    async searchUserMemories(
+        query: string,
+        discordUserId: string,
+        limit: number = 5,
+        minScore: number = 0.4
+    ): Promise<SearchResult[]> {
+        const results = await this.vectorStore.search(query, limit, { discordUserId });
+        return results.filter(r => r.score >= minScore);
+    }
+
+    /**
+     * 特定ユーザーの全記憶を取得
+     */
+    async getUserMemories(discordUserId: string): Promise<MemoryEntry[]> {
+        const all = await this.vectorStore.getAll();
+        return all.filter(m => m.metadata.discordUserId === discordUserId);
+    }
+
+    /**
+     * ユーザー別の記憶統計
+     */
+    async getUserMemoryStats(discordUserId: string): Promise<{
+        total: number;
+        byType: Record<MemoryType, number>;
+    }> {
+        const memories = await this.getUserMemories(discordUserId);
+        const byType: Record<MemoryType, number> = {
+            fact: 0,
+            episode: 0,
+            skill: 0,
+            preference: 0,
+            relationship: 0,
+        };
+
+        for (const entry of memories) {
+            byType[entry.metadata.type]++;
+        }
+
+        return {
+            total: memories.length,
+            byType,
+        };
     }
 
     /**
