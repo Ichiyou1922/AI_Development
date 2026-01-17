@@ -712,12 +712,12 @@ ipcMain.handle('send-message-stream', async (_event, message: string) => {
     } catch (error) {
         console.error('[RAG] Context building failed:', error);
     }
-
+    /*
     const systemPrompt = `あなたは親切なAIアシスタントです．
     ユーザーとの過去のやり取りから得た情報を活用して，パーソナライズされた応答をおこなってください．
     ${context}
     上記の情報がある場合は，自然な形で活用してください．`;
-
+    */
     let fullResponse = '';
     // コールバック定義
     const callbacks: StreamCallbacks = {
