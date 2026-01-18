@@ -117,6 +117,10 @@ export class VoicevoxProvider implements TTSProvider {
         // 読み上げ速度を設定値で上書き
         audioQuery.speedScale = this.speedScale;
 
+        // Discord用最適化: 変換負荷をゼロにするため、最初から48kHz Stereoで生成させる
+        audioQuery.outputSamplingRate = 48000;
+        audioQuery.outputStereo = true;
+
         // Step 2: 音声合成
         const synthesisController = new AbortController();
         const synthesisTimeout = setTimeout(() => synthesisController.abort(), 60000); // 60秒

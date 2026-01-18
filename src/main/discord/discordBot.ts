@@ -109,7 +109,7 @@ export class DiscordBot extends EventEmitter {
                     await message.reply('音声チャンネルに参加しました。');
                 } catch (error) {
                     console.error('[DiscordBot] Join error:', error);
-                    await message.reply('参加できませんでした。権限などを確認してください。');
+                    await message.reply(`参加できませんでした。エラー詳細: ${error}`);
                 }
             } else {
                 await message.reply('先に音声チャンネルに参加してください。');
@@ -139,9 +139,9 @@ export class DiscordBot extends EventEmitter {
         //if (!isMentioned && !hasPrefix) return;
         if (hasPrefix) {
             content = content.slice(this.config.prefix!.length).trim();
-            if(content.startsWith('!callme ')) {
+            if (content.startsWith('!callme ')) {
                 const name = content.slice(8).trim();
-                if (name.length > 0 && name.length <=20) {
+                if (name.length > 0 && name.length <= 20) {
                     this.setUserName(message.author.id, name);
                     await message.reply(`これからは「${name}」とお呼びします！`);
                 } else {
@@ -159,9 +159,9 @@ export class DiscordBot extends EventEmitter {
                         `変更したい場合は \`!ai !callme [名前]\` と入力してください。`);
                 }
                 return;
-            } 
+            }
         } else {
-                content = content;
+            content = content;
         }
         /* 
         // メッセージ内容を抽出（メンションやプレフィックスを除去）

@@ -527,4 +527,13 @@ export const myDetector = new MyDetector();
 
 - [01-architecture-overview.md](01-architecture-overview.md) - アーキテクチャ概要
 - [02-adding-new-features.md](02-adding-new-features.md) - 新機能追加ガイド
-- [05-configuration-system.md](05-configuration-system.md) - 設定システム
+## Troubleshooting
+
+### Native Module Issues
+
+音声処理のパフォーマンス問題（CPU使用率が高いなど）が発生した場合、ネイティブの Opus ライブラリが使用されていない可能性があります。
+ログに `[DiscordVoice] @discordjs/opus not found` と表示されている場合は、以下のコマンドでネイティブモジュールをリビルドしてください：
+
+```bash
+npm rebuild @discordjs/opus
+```

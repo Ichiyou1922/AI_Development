@@ -27,15 +27,22 @@ fi
 echo -e "${GREEN}Ollama is ready.${NC}"
 
 # 2. VOICEVOX Engine (Docker) Check
-echo -e "\n${YELLOW}[2/3] Checking VOICEVOX Engine (Docker/CPU)...${NC}"
+echo -e "\n${YELLOW}[2/3] Checking VOICEVOX Engine (Docker/CPU/GPU)...${NC}"
 # GPU版が起動している場合は停止
 if [ "$(sudo docker ps -q -f name=voicevox_engine_gpu)" ]; then
     echo "Stopping running GPU Voicevox container..."
     sudo docker stop voicevox_engine_gpu > /dev/null
 fi
+if [ "$(sudo docker ps -q -f name=voicevox_engine_cpu)" ]; then
+    echo "Stopping running CPU Voicevox container..."
+    sudo docker stop voicevox_engine_cpu > /dev/null
+fi
 
-CONTAINER_NAME="voicevox_engine_cpu"
-IMAGE_NAME="voicevox/voicevox_engine:cpu-ubuntu20.04-latest"
+#CONTAINER_NAME="voicevox_engine_cpu"
+#IMAGE_NAME="voicevox/voicevox_engine:cpu-ubuntu20.04-latest"
+# GPU版を使うならこっち
+CONTAINER_NAME="voicevox_engine_gpu"
+IMAGE_NAME="voicevox/voicevox_engine:nvidia-ubuntu20.04-latest"
 
 if [ ! "$(sudo docker ps -q -f name=$CONTAINER_NAME)" ]; then
     if [ "$(sudo docker ps -aq -f status=exited -f name=$CONTAINER_NAME)" ]; then
@@ -46,7 +53,7 @@ if [ ! "$(sudo docker ps -q -f name=$CONTAINER_NAME)" ]; then
         # 新規起動
         echo "Starting new VOICEVOX container..."
         # ポート50021を使用
-        sudo docker run --rm -d -p 50021:50021 --name $CONTAINER_NAME $IMAGE_NAME
+        sudo docker run --rm -d --gpus all -p 50021:50021 --name $CONTAINER_NAME $IMAGE_NAME
     fi
     
     # 起動待機
@@ -81,6 +88,6 @@ cleanup() {
 trap cleanup SIGINT SIGTERM
 
 # アプリ起動（ウォッチモード）
-npm run dev:watch
+npm run dev
 
 cleanup

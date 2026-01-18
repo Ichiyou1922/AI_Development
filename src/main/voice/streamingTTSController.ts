@@ -6,7 +6,7 @@ import { AudioPlayer } from './audioPlayer.js';
  * 文区切り検出用の正規表現
  * 句読点で文を区切る
  */
-const SENTENCE_DELIMITERS = /[。！？!?\n]/;
+const SENTENCE_DELIMITERS = /[。！？!?\n、,…]/;
 
 /**
  * 音声キューアイテム

@@ -9,6 +9,7 @@ import {
     AudioPlayerStatus,
     EndBehaviorType,
     VoiceReceiver,
+    StreamType,
 } from '@discordjs/voice';
 import { Client, VoiceChannel, GuildMember } from 'discord.js';
 import { Readable } from 'stream';
@@ -17,6 +18,15 @@ import * as path from 'path';
 import * as os from 'os';
 import { IdentifiedAudio, VoiceChannelInfo, VoiceChannelMember } from './types.js';
 import * as prism from 'prism-media';
+
+// Check Opus implementation
+try {
+    const opus = require('@discordjs/opus');
+    console.log('[DiscordVoice] using native @discordjs/opus implementation');
+} catch (e) {
+    console.warn('[DiscordVoice] @discordjs/opus not found, falling back to script implementation (LOW PERFORMANCE)', e);
+}
+
 import { getDiscordUserManager } from '../memory/discordUsers.js';
 
 /**
@@ -36,6 +46,7 @@ export class DiscordVoice extends EventEmitter {
 
     // 話者ごとの音声バッファ
     private userAudioBuffers: Map<string, Buffer[]> = new Map();
+    private userAudioByteLength: Map<string, number> = new Map(); // バッファサイズのキャッシュ
     private userSilenceTimers: Map<string, NodeJS.Timeout> = new Map();
     private userSpeakingStart: Map<string, number> = new Map();
 
@@ -118,29 +129,6 @@ export class DiscordVoice extends EventEmitter {
     }
 
     /**
-     * 音声チャンネルから退出
-     */
-    leaveChannel(): void {
-        if (this.connection) {
-            console.log('[DiscordVoice] Leaving voice channel');
-            this.connection.destroy();
-            this.connection = null;
-            this.currentChannelId = null;
-            this.currentGuildId = null;
-
-            // バッファをクリア
-            this.userAudioBuffers.clear();
-            this.userSpeakingStart.clear();
-            for (const timer of this.userSilenceTimers.values()) {
-                clearTimeout(timer);
-            }
-            this.userSilenceTimers.clear();
-
-            this.emit('disconnected');
-        }
-    }
-
-    /**
      * 音声受信を開始
      */
     private startReceiving(): void {
@@ -166,6 +154,27 @@ export class DiscordVoice extends EventEmitter {
         });
     }
 
+
+    /**
+     * 音声チャンネルから退出
+     */
+    leaveChannel(): void {
+        if (this.connection) {
+            console.log('[DiscordVoice] Leaving voice channel');
+            this.connection.destroy();
+            this.connection = null;
+            this.currentChannelId = null;
+            this.currentGuildId = null;
+
+            // バッファをクリア
+            this.clearAllBuffers();
+
+            this.emit('disconnected');
+        }
+    }
+
+    // ... (skipped)
+
     /**
      * ユーザーが話し始めた時の処理
      */
@@ -177,14 +186,14 @@ export class DiscordVoice extends EventEmitter {
             this.userSilenceTimers.delete(userId);
         }
 
-        // 既に購読中の場合は開始時刻のみ更新
+        // 既に購読中の場合は何もしない（ログ出力も抑制）
         if (this.userAudioBuffers.has(userId)) {
-            console.log(`[DiscordVoice] User ${userId} resuming speech (continuing buffer)`);
             return;
         }
 
         // 新しいバッファを作成
         this.userAudioBuffers.set(userId, []);
+        this.userAudioByteLength.set(userId, 0);
         this.userSpeakingStart.set(userId, Date.now());
 
         // 音声ストリームを購読
@@ -213,23 +222,27 @@ export class DiscordVoice extends EventEmitter {
                 buffers.push(chunk);
                 chunkCount++;
 
+                // 現在の合計バイト数を更新
+                const currentLength = (this.userAudioByteLength.get(userId) || 0) + chunk.length;
+                this.userAudioByteLength.set(userId, currentLength);
+
                 // 最大長チェック
-                const totalBytes = buffers.reduce((sum, b) => sum + b.length, 0);
                 // PCMデータなのでバイト数から時間を計算可能 (48kHz * 2ch * 2bytes = 192000 bytes/sec)
                 // totalBytes / 4 (サンプル数) / 48 (kHz) = ms
-                const durationMs = (totalBytes / 4) / 48;
+                const durationMs = (currentLength / 4) / 48;
 
                 if (durationMs >= this.maxAudioDurationMs) {
-                    console.log(`[DiscordVoice] Max duration reached for user ${userId}, flushing`);
+                    // console.log(`[DiscordVoice] Max duration reached for user ${userId}, flushing`);
                     this.flushUserAudio(userId);
                 }
             }
         });
 
         pcmStream.on('end', () => {
-            console.log(`[DiscordVoice] Audio stream ended for user ${userId}, chunks: ${chunkCount}`);
+            // console.log(`[DiscordVoice] Audio stream ended for user ${userId}, chunks: ${chunkCount}`);
             this.scheduleAudioFlush(userId);
         });
+        // ...
 
         pcmStream.on('error', (error: any) => {
             console.error(`[DiscordVoice] Audio stream error for user ${userId}:`, error);
@@ -275,6 +288,7 @@ export class DiscordVoice extends EventEmitter {
         const startTime = this.userSpeakingStart.get(userId);
 
         this.userAudioBuffers.delete(userId);
+        this.userAudioByteLength.delete(userId);
         this.userSpeakingStart.delete(userId);
         this.userSilenceTimers.delete(userId);
 
@@ -353,8 +367,12 @@ export class DiscordVoice extends EventEmitter {
         const outputSampleRate = 16000;
         const ratio = inputSampleRate / outputSampleRate;  // 3
 
-        // 入力: stereo なので 4 bytes = 1 sample pair (L + R)
-        const inputSamplePairs = Math.floor(buffer.length / 4);
+        // BufferからInt16Arrayを作成（コピーなしでメモリ共有）
+        // オフセットと長さに注意
+        const inputInt16 = new Int16Array(buffer.buffer, buffer.byteOffset, buffer.length / 2);
+
+        // ステレオ(2ch)なので、サンプルペア数は inputInt16.length / 2
+        const inputSamplePairs = Math.floor(inputInt16.length / 2);
         const outputSamples = Math.floor(inputSamplePairs / ratio);
 
         if (outputSamples <= 0) {
@@ -362,26 +380,29 @@ export class DiscordVoice extends EventEmitter {
             return Buffer.alloc(0);
         }
 
-        const output = Buffer.alloc(outputSamples * 2);  // mono 16bit
+        const outputInt16 = new Int16Array(outputSamples);
 
         for (let i = 0; i < outputSamples; i++) {
-            const srcIndex = Math.floor(i * ratio) * 4;
+            // ダウンサンプリング：単純な間引き（Nearest Neighbor） + 平均化
+            // 48kHz -> 16kHz なので 3サンプルごとにピックアップ
+            const srcIndex = i * ratio * 2; // *2 はステレオのため
 
-            if (srcIndex + 3 >= buffer.length) break;
+            if (srcIndex + 1 >= inputInt16.length) break;
 
-            // ステレオをモノラルに（左右の平均）
-            const left = buffer.readInt16LE(srcIndex);
-            const right = buffer.readInt16LE(srcIndex + 2);
-            const mono = Math.round((left + right) / 2);
+            const left = inputInt16[srcIndex];
+            const right = inputInt16[srcIndex + 1];
 
-            output.writeInt16LE(mono, i * 2);
+            // モノラル化: (L + R) / 2
+            // ビット演算で高速化: (L + R) >> 1
+            outputInt16[i] = (left + right) >> 1;
         }
 
-        return output;
+        return Buffer.from(outputInt16.buffer);
     }
 
     /**
      * 音声を再生（VOICEVOXの出力を流す）
+     * メモリ上のバッファから直接ストリーミング再生を行い、ディスクI/Oを回避
      */
     async playAudio(wavBuffer: Buffer): Promise<void> {
         if (!this.connection) {
@@ -396,35 +417,53 @@ export class DiscordVoice extends EventEmitter {
         // 既存のバッファをクリア（再生開始前に溜まった音声を破棄）
         this.clearAllBuffers();
 
-        // WAVファイルを一時保存
-        const tempFile = path.join(os.tmpdir(), `discord_tts_${Date.now()}.wav`);
-
         try {
-            await fs.writeFile(tempFile, wavBuffer);
+            // WAVヘッダー解析 (44bytes)
+            const HEADER_SIZE = 44;
+            if (wavBuffer.length < HEADER_SIZE) return;
 
-            const resource = createAudioResource(tempFile);
+            // Voicevox側で「48kHz Stereo」を指定して生成させているため、
+            // JSでのリサンプルや変換は一切不要。
+            // ヘッダーを飛ばしてそのまま流し込む（ゼロ・コピー/ゼロ・コンバージョン）
+
+            const pcmBuffer = wavBuffer.subarray(HEADER_SIZE);
+
+            // Raw PCMとして再生 (FFmpeg不要)
+            const resource = createAudioResource(Readable.from(pcmBuffer), {
+                inputType: StreamType.Raw,
+            });
+
             this.audioPlayer.play(resource);
 
             this.emit('speakingStart');
 
             // 再生完了を待つ
             await new Promise<void>((resolve) => {
-                this.audioPlayer.once(AudioPlayerStatus.Idle, () => {
+                const onIdle = () => {
+                    this.audioPlayer.off('error', onError);
                     resolve();
-                });
+                };
+
+                const onError = (error: any) => {
+                    console.error('[DiscordVoice] AudioPlayer playback error:', error);
+                    this.audioPlayer.off(AudioPlayerStatus.Idle, onIdle);
+                    resolve(); // エラーでも完了扱いにする
+                };
+
+                this.audioPlayer.once(AudioPlayerStatus.Idle, onIdle);
+                this.audioPlayer.once('error', onError);
             });
 
             // 再生終了後、少し待ってからリスニング再開（エコー防止）
-            await new Promise<void>((resolve) => setTimeout(resolve, 500)); // エコー発生なら1000くらいに
+            await new Promise<void>((resolve) => setTimeout(resolve, 300));
 
+
+
+
+
+        } catch (error) {
+            console.error('[DiscordVoice] playback setup error:', error);
         } finally {
-            // 一時ファイル削除
-            try {
-                await fs.unlink(tempFile);
-            } catch {
-                // 無視
-            }
-
             // 再生中フラグをOFF
             this.isSpeaking = false;
             console.log('[DiscordVoice] TTS playback ended, receiving resumed');
