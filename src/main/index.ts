@@ -30,7 +30,8 @@ import {
 import { autonomousController } from './agent/index.js';
 // 設定システム
 import { initConfig, config, getIdleDetectorConfig, getIgnoreDetectorConfig } from './config/index.js';
-import { screenshotCapture, ScreenContext, screenRecognitionController, activeWindowMonitor } from './screen/index.js';
+import { screenshotCapture, ScreenContext, activeWindowMonitor } from './events/screen/index.js';
+import { mainController } from './events/screen/mainController.js';
 import { AlwaysOnListener, ListenerConfig } from './mascot/alwaysOnListener.js';
 import { STTRouter } from './voice/sttRouter.js';
 
@@ -1121,26 +1122,7 @@ ipcMain.handle('autonomous-set-enabled', (_event, enabled: boolean) => {
     return { success: true };
 });
 
-// IPC: 画面認識統計
-ipcMain.handle('screen-stats', () => {
-    return screenRecognitionController.getStats();
-});
 
-// IPC: 画面認識設定
-ipcMain.handle('screen-set-enabled', (_event, enabled: boolean) => {
-    screenRecognitionController.updateConfig({ enabled });
-    if (enabled) {
-        screenRecognitionController.start();
-    } else {
-        screenRecognitionController.stop();
-    }
-    return { success: true };
-});
-
-// IPC: 現在のコンテキスト取得
-ipcMain.handle('screen-get-context', () => {
-    return screenRecognitionController.getCurrentContext();
-});
 
 // IPC: 常時リスニング制御
 ipcMain.handle('always-on-start', async () => {
@@ -1633,48 +1615,40 @@ app.whenReady().then(async () => {
     console.log('[App] Autonomous controller initialized');
 
     // ============================================================
-    // 画面認識システムの初期化
+
+
+    // ============================================================
+    // 画像認識リアクション（MainController）の初期化
     // ============================================================
 
-    // LLMテキストハンドラを設定
-    screenRecognitionController.setLLMTextHandler(async (prompt: string) => {
-        return new Promise((resolve, reject) => {
-            let response = '';
-            llmRouter.sendMessageStream(
-                [{ role: 'user', content: prompt }],
-                {
-                    onToken: (token) => { response += token; },
-                    onDone: () => resolve(response),
-                    onError: (error) => reject(new Error(error)),
+    // リアクションハンドラを設定（Discord音声のみ）
+    mainController.setReactionHandler(async (reaction: string) => {
+        // Discord Botが有効かつ音声チャンネルに接続している場合のみ発話
+        if (discordBot && discordBot.isVoiceConnected() && ttsEnabled) {
+            try {
+                // 音声合成
+                const audioBuffer = await voicevoxProvider.synthesize(reaction);
+
+                // Discordで再生
+                await discordBot.playAudio(audioBuffer);
+                console.log('[MainController] Spoke reaction to Discord voice');
+
+                // 発話したことを対話コントローラに通知（無視検出リセットなど）
+                if (voiceDialogue) {
+                    voiceDialogue.notifyAgentSpoke('discord');
                 }
-            );
-        });
-    });
-
-    // 画面認識イベントをRendererに転送
-    screenRecognitionController.on('contextChange', (context: ScreenContext) => {
-        mainWindow?.webContents.send('screen-context-change', context);
-    });
-
-    screenRecognitionController.on('reaction', (data) => {
-        mainWindow?.webContents.send('screen-reaction', data);
-
-        // TTSが有効なら読み上げ
-        if (ttsEnabled && data.message) {
-            voicevoxProvider.synthesize(data.message)
-                .then(audio => audioPlayer.play(audio))
-                .catch(err => console.error('[ScreenRecognition] TTS failed:', err));
+            } catch (error) {
+                console.error('[MainController] Failed to speak reaction:', error);
+            }
+        } else {
+            console.log('[MainController] Skipped reaction speech (Discord voice not active)');
         }
     });
 
-    // 画面認識を開始（ウィンドウ監視のみ，スクリーンショットは無効）
-    screenRecognitionController.start({
-        windowMonitorEnabled: true,
-        screenshotEnabled: false,
-        reactToWindowChange: true,
-    });
+    // MainControllerを開始
+    mainController.start();
 
-    console.log('[App] Screen recognition initialized');
+    console.log('[App] MainController (Screen Reaction) initialized');
 
     // ============================================================
     // STTルーターの初期化
@@ -1787,7 +1761,7 @@ app.on('before-quit', async () => {
 
     // 監視系を停止
     activeWindowMonitor.stop();
-    screenRecognitionController.stop();
+
 
     if (voiceDialogue) {
         voiceDialogue.stop();

@@ -8,9 +8,8 @@ export class ScreenshotCapture extends EventEmitter {
     private captureInterval: NodeJS.Timeout | null = null;
     private config = {
         enabled: true,
-        intervalMs: 1 * 60 * 1000,  // 1分ごと
-        maxWidth: 800,               // 最大幅
-        quality: 60,                 // JPEG品質
+        intervalMs: 30 * 1000,  // 1分ごと
+        quality: 90,                 // JPEG品質
     };
 
     /**
@@ -49,28 +48,23 @@ export class ScreenshotCapture extends EventEmitter {
     async capture(): Promise<Buffer | null> {
         try {
             const primaryDisplay = screen.getPrimaryDisplay();
-            const { width, height } = primaryDisplay.size;
+            const width = primaryDisplay.size.width * primaryDisplay.scaleFactor;
+            const height = primaryDisplay.size.height * primaryDisplay.scaleFactor;
 
-            // スクリーンソースを取得
             const sources = await desktopCapturer.getSources({
                 types: ['screen'],
-                thumbnailSize: {
-                    width: Math.min(width, this.config.maxWidth),
-                    height: Math.min(height, Math.round(this.config.maxWidth * height / width)),
-                },
+                thumbnailSize: { width, height },
             });
 
-            if (sources.length === 0) {
+            if ( sources.length === 0) {
                 console.warn('[ScreenshotCapture] No screen sources found');
                 return null;
             }
 
-            // プライマリディスプレイのサムネイルを取得
-            const thumbnail = sources[0].thumbnail;
-
-            // JPEG形式でバッファに変換
-            const buffer = thumbnail.toJPEG(this.config.quality);
-            return buffer;
+            const source = sources[0];
+            //JPEGバッファに変換
+            return source.thumbnail.toJPEG(this.config.quality);
+            
         } catch (error) {
             console.error('[ScreenshotCapture] Capture failed:', error);
             return null;

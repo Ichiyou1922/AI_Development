@@ -298,6 +298,8 @@ export interface PromptsConfig {
         compression: string;
         evaluation: string;
     };
+    /** 画面認識リアクション用プロンプト */
+    screenReaction: string;
 }
 
 // ============================================================
