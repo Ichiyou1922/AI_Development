@@ -109,7 +109,7 @@ export class VoicevoxProvider implements TTSProvider {
                 throw new Error(`AudioQuery failed: ${queryResponse.status} - ${errorText}`);
             }
 
-            audioQuery = await queryResponse.json();
+            audioQuery = await queryResponse.json() as AudioQuery;
         } finally {
             clearTimeout(queryTimeout);
         }
@@ -159,7 +159,7 @@ export class VoicevoxProvider implements TTSProvider {
             throw new Error(`Failed to get speakers: ${response.status}`);
         }
 
-        const speakers: VoicevoxSpeaker[] = await response.json();
+        const speakers: VoicevoxSpeaker[] = await response.json() as VoicevoxSpeaker[];
 
         return speakers.map((s, index) => ({
             id: index,

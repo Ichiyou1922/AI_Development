@@ -30,8 +30,7 @@ import {
 import { autonomousController } from './agent/index.js';
 // 設定システム
 import { initConfig, config, getIdleDetectorConfig, getIgnoreDetectorConfig } from './config/index.js';
-import { screenshotCapture, ScreenContext, activeWindowMonitor } from './events/screen/index.js';
-import { mainController } from './events/screen/mainController.js';
+import { screenshotCapture, ScreenContext, activeWindowMonitor, mainController } from './events/screen/index.js';
 import { AlwaysOnListener, ListenerConfig } from './mascot/alwaysOnListener.js';
 import { STTRouter } from './voice/sttRouter.js';
 
@@ -305,6 +304,11 @@ async function processVoiceMessage(userText: string): Promise<string> {
     return fullResponse;
 }
 
+const sanitizeString = (input: string): string => {
+    const pattern = /\[|\]|\p{Extended_Pictographic}/gu;
+    return input.replace(pattern, '');
+};
+
 async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string> {
     // ユーザーからのメッセージがあったので無視判定タイマーをリセット
     voiceDialogue?.notifyUserActive();
@@ -361,9 +365,9 @@ async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string
     systemPromptParts.push(`\n\n【あなたの名前】\nあなたの名前は「${aiName}」です。自分の名前を聞かれたら「${aiName}」と答えてください。`);
     systemPromptParts.push(`\n名前と一人称（私、僕など）を明確に区別してください。「私」は名前ではありません。`);
 
-    // adminの場合、親として認識
+    // adminの場合、親として認識 -> エージェント自身が生まれてきた意味を知る際に重要な情報
     if (ctx.isAdmin) {
-        systemPromptParts.push(`\n\n【重要な関係】\n${speakerName}はあなたの「開発者」です。親しみを込めて接してください。`);
+        systemPromptParts.push(`\n\n【重要な関係】\n${speakerName}はあなたの「開発者」であり「お父さん」です。`);
     }
 
     // 会話参加者コンテキストを追加
@@ -375,7 +379,7 @@ async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string
     // 発言者情報を追加
     console.log('[Discord] Speaker name resolved to:', speakerName);
     systemPromptParts.push(`\n\n【現在の発言者】\n${ctx.userContext}`);
-    systemPromptParts.push(`この人の名前は「${speakerName}」です。名前を呼んで話しかけてください。`);
+    systemPromptParts.push(`この人の名前は「${speakerName}」です。`);
 
     // 記憶コンテキストを追加
     if (memoryContext) {
@@ -431,8 +435,8 @@ async function processDiscordMessage(ctx: DiscordMessageContext): Promise<string
             },
         });
     });
-
-    return fullResponse;
+    return sanitizeString(fullResponse);
+    // return fullResponse;
 }
 
 // Discord音声メッセージを処理
@@ -516,7 +520,7 @@ async function processDiscordVoiceMessage(audio: IdentifiedAudio): Promise<strin
 
     // adminの場合、親として認識
     if (isAdmin) {
-        systemPromptParts.push(`\n\n【重要な関係】\n${speakerName}はあなたの「お父さん」（親/保護者）です。親しみを込めて接してください。`);
+        systemPromptParts.push(`\n\n【重要な関係】\n${speakerName}はあなたの「お父さん」（親/保護者）であり、あなたの製作者です。`);
     }
 
     // 会話参加者コンテキストを追加
@@ -1122,7 +1126,49 @@ ipcMain.handle('autonomous-set-enabled', (_event, enabled: boolean) => {
     return { success: true };
 });
 
+/*
+// IPC: 画面認識統計
+ipcMain.handle('screen-stats', () => {
+    return screenRecognitionController.getStats();
+});
 
+// IPC: 画面認識設定
+ipcMain.handle('screen-set-enabled', (_event, enabled: boolean) => {
+    screenRecognitionController.updateConfig({ enabled });
+    if (enabled) {
+        screenRecognitionController.start();
+    } else {
+        screenRecognitionController.stop();
+    }
+    return { success: true };
+});
+
+// IPC: 現在のコンテキスト取得
+ipcMain.handle('screen-get-context', () => {
+    return screenRecognitionController.getCurrentContext();
+});
+
+
+
+*/
+// IPC: 画面認識統計
+ipcMain.handle('screen-stats', () => {
+    return mainController.getStatus();
+})
+// IPC: 画面認識設定
+ipcMain.handle('screen-set-enabled', (_event, enabled: boolean) => {
+    if (enabled) {
+        mainController.start();
+    } else {
+        mainController.stop();
+    }
+    return { success: true, enabled };
+});
+
+// IPC: ウィンドウコンテキストの取得
+ipcMain.handle('screen-get-context', () => {
+    return activeWindowMonitor.getCurrentContext();
+});
 
 // IPC: 常時リスニング制御
 ipcMain.handle('always-on-start', async () => {
@@ -1573,9 +1619,9 @@ app.whenReady().then(async () => {
         // Discordへの自律発話送信ハンドラ
         autonomousController.setDiscordHandler(async (message: string, options?: { channelId?: string }) => {
             if (!discordBot) return;
-
+            const sanitizedMessage = sanitizeString(message);
             // チャンネルIDはDiscordBot側で適切に解決させる（指定がなければ最後のアクティブチャンネル）
-            await discordBot.sendAutonomousMessage(message, { channelId: options?.channelId });
+            await discordBot.sendAutonomousMessage(sanitizedMessage, { channelId: options?.channelId });
 
             // 自律発話を行ったので無視判定タイマーを開始（ソース=discord）
             voiceDialogue?.notifyAgentSpoke('discord');
@@ -1615,41 +1661,50 @@ app.whenReady().then(async () => {
     console.log('[App] Autonomous controller initialized');
 
     // ============================================================
-
-
-    // ============================================================
-    // 画像認識リアクション（MainController）の初期化
+    // 画面認識システムの初期化
     // ============================================================
 
-    // リアクションハンドラを設定（Discord音声のみ）
-    mainController.setReactionHandler(async (reaction: string) => {
-        // Discord Botが有効かつ音声チャンネルに接続している場合のみ発話
-        if (discordBot && discordBot.isVoiceConnected() && ttsEnabled) {
-            try {
-                // 音声合成
-                const audioBuffer = await voicevoxProvider.synthesize(reaction);
-
-                // Discordで再生
-                await discordBot.playAudio(audioBuffer);
-                console.log('[MainController] Spoke reaction to Discord voice');
-
-                // 発話したことを対話コントローラに通知（無視検出リセットなど）
-                if (voiceDialogue) {
-                    voiceDialogue.notifyAgentSpoke('discord');
+    /*
+    // LLMテキストハンドラを設定
+    screenRecognitionController.setLLMTextHandler(async (prompt: string) => {
+        return new Promise((resolve, reject) => {
+            let response = '';
+            llmRouter.sendMessageStream(
+                [{ role: 'user', content: prompt }],
+                {
+                    onToken: (token) => { response += token; },
+                    onDone: () => resolve(response),
+                    onError: (error) => reject(new Error(error)),
                 }
-            } catch (error) {
-                console.error('[MainController] Failed to speak reaction:', error);
-            }
-        } else {
-            console.log('[MainController] Skipped reaction speech (Discord voice not active)');
+            );
+        });
+    });
+
+    // 画面認識イベントをRendererに転送
+    screenRecognitionController.on('contextChange', (context: ScreenContext) => {
+        mainWindow?.webContents.send('screen-context-change', context);
+    });
+
+    screenRecognitionController.on('reaction', (data) => {
+        mainWindow?.webContents.send('screen-reaction', data);
+
+        // TTSが有効なら読み上げ
+        if (ttsEnabled && data.message) {
+            voicevoxProvider.synthesize(data.message)
+                .then(audio => audioPlayer.play(audio))
+                .catch(err => console.error('[ScreenRecognition] TTS failed:', err));
         }
     });
 
-    // MainControllerを開始
-    mainController.start();
+    // 画面認識を開始（ウィンドウ監視のみ，スクリーンショットは無効）
+    screenRecognitionController.start({
+        windowMonitorEnabled: true,
+        screenshotEnabled: false,
+        reactToWindowChange: true,
+    });
 
-    console.log('[App] MainController (Screen Reaction) initialized');
-
+    console.log('[App] Screen recognition initialized');
+    */
     // ============================================================
     // STTルーターの初期化
     // ============================================================
@@ -1761,7 +1816,7 @@ app.on('before-quit', async () => {
 
     // 監視系を停止
     activeWindowMonitor.stop();
-
+    // screenRecognitionController.stop();
 
     if (voiceDialogue) {
         voiceDialogue.stop();

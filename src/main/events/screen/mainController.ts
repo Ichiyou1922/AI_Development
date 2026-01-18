@@ -78,6 +78,7 @@ export class MainController {
                 // アクティブウィンドウ取得（取得できていない場合は少し待って再試行）
                 let context = activeWindowMonitor.getCurrentContext();
                 if (!context) {
+                    console.log('[mainController] Waiting for active window context...');
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     context = activeWindowMonitor.getCurrentContext();
                 }
@@ -151,7 +152,8 @@ export class MainController {
                 throw new Error(`Ollama API Error: ${response.statusText}`);
             }
 
-            const data = await response.json();
+            const data = await response.json() as { response: string };
+            console.log('[mainController] Received response from Gemma');
             return data.response;
         } catch (error) {
             return `(Gemmaとの通信エラー: ${error})`;

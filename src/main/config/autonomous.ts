@@ -54,7 +54,7 @@ export const productionIdleConfig: IdleDetectorConfig = {
 
 export const productionIgnoreConfig: IgnoreDetectorConfig = {
     ignoreThresholdSeconds: 30,             // 30秒
-    checkIntervalMs: 10000,                  // 1分ごとにチェック
+    checkIntervalMs: 5000,                  // 5秒ごとにチェック
 };
 
 /**
