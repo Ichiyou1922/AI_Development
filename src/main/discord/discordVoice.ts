@@ -455,7 +455,7 @@ export class DiscordVoice extends EventEmitter {
             });
 
             // 再生終了後、少し待ってからリスニング再開（エコー防止）
-            await new Promise<void>((resolve) => setTimeout(resolve, 300));
+            await new Promise<void>((resolve) => setTimeout(resolve, 500));
 
 
 

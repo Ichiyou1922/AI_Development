@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { spawn, ChildProcess } from 'child_process';
 import { FasterWhisperConfig } from '../config/index.js';
+import { createWavBuffer } from '../utils/audioUtils.js';
 
 /**
  * faster-whisper を使用した高速音声認識プロバイダ
@@ -225,7 +226,7 @@ export class FasterWhisperProvider implements STTProvider {
         }
 
         // WAVヘッダーを付与
-        const wavBuffer = this.createWavBuffer(audioBuffer, sampleRate);
+        const wavBuffer = createWavBuffer(audioBuffer, sampleRate);
 
         console.log(`[FasterWhisper] Transcribing ${wavBuffer.length} bytes (${(audioBuffer.length / 2 / sampleRate * 1000).toFixed(0)}ms at ${sampleRate}Hz)`);
 
@@ -284,42 +285,6 @@ export class FasterWhisperProvider implements STTProvider {
     }
 
     /**
-     * WAVヘッダーを付与
-     */
-    private createWavBuffer(audioData: Buffer, sampleRate: number): Buffer {
-        const channels = 1;
-        const bitDepth = 16;
-        const byteRate = sampleRate * channels * (bitDepth / 8);
-        const blockAlign = channels * (bitDepth / 8);
-        const dataSize = audioData.length;
-        const headerSize = 44;
-
-        const buffer = Buffer.alloc(headerSize + dataSize);
-
-        // RIFF header
-        buffer.write('RIFF', 0);
-        buffer.writeUInt32LE(36 + dataSize, 4);
-        buffer.write('WAVE', 8);
-
-        // fmt chunk
-        buffer.write('fmt ', 12);
-        buffer.writeUInt32LE(16, 16);           // chunk size
-        buffer.writeUInt16LE(1, 20);            // PCM format
-        buffer.writeUInt16LE(channels, 22);
-        buffer.writeUInt32LE(sampleRate, 24);
-        buffer.writeUInt32LE(byteRate, 28);
-        buffer.writeUInt16LE(blockAlign, 32);
-        buffer.writeUInt16LE(bitDepth, 34);
-
-        // data chunk
-        buffer.write('data', 36);
-        buffer.writeUInt32LE(dataSize, 40);
-        audioData.copy(buffer, 44);
-
-        return buffer;
-    }
-
-    /**
      * サーバーを停止
      */
     async shutdown(): Promise<void> {
@@ -368,7 +333,7 @@ export class FasterWhisperProvider implements STTProvider {
             });
 
             if (response.ok) {
-                return await response.json();
+                return await response.json() as { model: string; device: string; compute_type: string };
             }
         } catch {
             // ignore
